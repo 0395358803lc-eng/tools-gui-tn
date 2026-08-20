@@ -11,18 +11,31 @@ def test_whatsapp_bot_text_workflow_order():
     bot = wb.WhatsAppBot("emulator-5554")
 
     class App:
-        def _ensure_not_cancelled(self): pass
-        def open_app(self): events.append("open_app")
-        def ensure_onboarded(self): events.append("ensure_onboarded")
-        def open_contact_picker(self): events.append("open_contact_picker")
+        def _ensure_not_cancelled(self):
+            pass
+
+        def open_app(self):
+            events.append("open_app")
+
+        def ensure_onboarded(self):
+            events.append("ensure_onboarded")
+
+        def open_contact_picker(self):
+            events.append("open_contact_picker")
 
     class Contacts:
-        def create_contact(self, phone): events.append(("create_contact", phone))
-        def open_chat(self, phone): events.append(("open_chat", phone))
+        def create_contact(self, phone):
+            events.append(("create_contact", phone))
+
+        def open_chat(self, phone):
+            events.append(("open_chat", phone))
 
     class Messenger:
-        def send_text(self, message): events.append(("send_text", message))
-        def send_with_image(self, images, message): events.append(("send_media", images, message))
+        def send_text(self, message):
+            events.append(("send_text", message))
+
+        def send_with_image(self, images, message):
+            events.append(("send_media", images, message))
 
     bot.app = App()
     bot.contacts = Contacts()
@@ -44,18 +57,31 @@ def test_whatsapp_bot_media_workflow_routes_to_media_sender():
     bot = wb.WhatsAppBot("emulator-5554")
 
     class App:
-        def _ensure_not_cancelled(self): pass
-        def open_app(self): events.append("open_app")
-        def ensure_onboarded(self): events.append("ensure_onboarded")
-        def open_contact_picker(self): events.append("open_contact_picker")
+        def _ensure_not_cancelled(self):
+            pass
+
+        def open_app(self):
+            events.append("open_app")
+
+        def ensure_onboarded(self):
+            events.append("ensure_onboarded")
+
+        def open_contact_picker(self):
+            events.append("open_contact_picker")
 
     class Contacts:
-        def create_contact(self, phone): events.append("create_contact")
-        def open_chat(self, phone): events.append("open_chat")
+        def create_contact(self, phone):
+            events.append("create_contact")
+
+        def open_chat(self, phone):
+            events.append("open_chat")
 
     class Messenger:
-        def send_text(self, message): events.append("send_text")
-        def send_with_image(self, images, message): events.append(("send_media", images, message))
+        def send_text(self, message):
+            events.append("send_text")
+
+        def send_with_image(self, images, message):
+            events.append(("send_media", images, message))
 
     bot.app = App()
     bot.contacts = Contacts()
@@ -84,6 +110,45 @@ def test_wait_wrapper_passes_cancel_callback(monkeypatch):
     monkeypatch.setattr(wb.ui, "wait_for", fake_wait)
     manager._wait_for(lambda dump: None, timeout=1)
     assert captured["cancelled"] is marker
+
+
+def test_open_app_skips_restart_when_already_home(monkeypatch):
+    controller = wb.WhatsAppAppController("emulator-5554")
+    shell_calls = []
+
+    monkeypatch.setattr(wb, "detect_state", lambda serial: wb.WhatsAppState.HOME)
+    monkeypatch.setattr(
+        wb.adb,
+        "shell",
+        lambda *args, **kwargs: shell_calls.append((args, kwargs)) or "",
+    )
+
+    controller.open_app()
+
+    assert shell_calls == []
+
+
+def test_open_contact_picker_skips_new_chat_when_already_in_picker(monkeypatch):
+    controller = wb.WhatsAppAppController("emulator-5554")
+    taps = []
+    dumps = []
+
+    monkeypatch.setattr(
+        wb,
+        "detect_state",
+        lambda serial: wb.WhatsAppState.CONTACT_PICKER,
+    )
+    monkeypatch.setattr(
+        wb.ui,
+        "ui_dump",
+        lambda *args, **kwargs: dumps.append(args) or None,
+    )
+    monkeypatch.setattr(wb.adb, "tap", lambda *args, **kwargs: taps.append(args))
+
+    controller.open_contact_picker()
+
+    assert dumps == []
+    assert taps == []
 
 
 def test_create_contact_refuses_unverified_coordinate_fallback(monkeypatch):
