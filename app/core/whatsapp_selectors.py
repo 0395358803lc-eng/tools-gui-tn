@@ -44,41 +44,72 @@ class FallbackCoord:
         self.center = center
 
 
+def _edit_text_by_semantics(dump: UiDump, label: str) -> Optional[Node]:
+    """Ưu tiên hint -> content-desc -> text trên các EditText."""
+    nodes = dump.find_all(cls="android.widget.EditText")
+    for attr in ("hint", "content_desc", "text"):
+        for node in nodes:
+            if getattr(node, attr) == label:
+                return node
+    return None
+
+
+def _clickable_by_desc_or_text(dump: UiDump, label: str) -> Optional[Node]:
+    """Ưu tiên content-desc; fallback text, ưu tiên node clickable."""
+    desc_nodes = [n for n in dump.nodes if n.content_desc == label]
+    text_nodes = [n for n in dump.nodes if n.text == label]
+    for group in (desc_nodes, text_nodes):
+        for node in group:
+            if node.clickable:
+                return node
+        if group:
+            return group[0]
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Hàm tìm selector (nhận UiDump, trả Node)
 # ---------------------------------------------------------------------------
 
 def find_new_chat_button(dump: UiDump) -> Optional[Node]:
-    node = dump.find(desc=DESC_NEW_CHAT)
-    if node is None:
-        node = dump.find(desc=DESC_SEND_MESSAGE)
-    return node
+    # Resource-ID đã xác minh ổn định hơn text/content-desc.
+    return (
+        dump.find(rid=RID_NEW_CHAT_FAB)
+        or _clickable_by_desc_or_text(dump, DESC_NEW_CHAT)
+        or _clickable_by_desc_or_text(dump, DESC_SEND_MESSAGE)
+    )
 
 
 def find_phone_field(dump: UiDump) -> Optional[Node]:
-    return next((n for n in dump.find_all(cls="android.widget.EditText")
-                 if n.hint == HINT_PHONE or n.text == HINT_PHONE), None)
+    return _edit_text_by_semantics(dump, HINT_PHONE)
 
 
 def find_message_field(dump: UiDump) -> Optional[Node]:
-    return next((n for n in dump.find_all(cls="android.widget.EditText")
-                 if n.hint == HINT_MESSAGE or n.text == HINT_MESSAGE), None)
+    return _edit_text_by_semantics(dump, HINT_MESSAGE)
 
 
 def find_caption_field(dump: UiDump) -> Optional[Node]:
-    return dump.find(desc=DESC_CAPTION) or dump.find(hint=HINT_CAPTION)
+    return (
+        dump.find(desc=DESC_CAPTION)
+        or dump.find(hint=HINT_CAPTION)
+        or dump.find(text=HINT_CAPTION)
+    )
 
 
 def find_save_button(dump: UiDump) -> Optional[Node]:
-    return dump.find(rid=RID_SAVE_BUTTON) or dump.find(text=TEXT_SAVE)
+    return dump.find(rid=RID_SAVE_BUTTON) or _clickable_by_desc_or_text(dump, TEXT_SAVE)
 
 
 def find_send_button(dump: UiDump) -> Optional[Node]:
-    return dump.find(desc=DESC_SEND)
+    return _clickable_by_desc_or_text(dump, DESC_SEND)
 
 
 def find_attach_button(dump: UiDump) -> Optional[Node]:
-    return dump.find(desc=DESC_ATTACH)
+    return _clickable_by_desc_or_text(dump, DESC_ATTACH)
+
+
+def find_gallery_entry(dump: UiDump) -> Optional[Node]:
+    return _clickable_by_desc_or_text(dump, TEXT_GALLERY)
 
 
 def find_first_media_thumbnail(dump: UiDump) -> Optional[Node]:
@@ -101,7 +132,7 @@ def find_send_media_button(dump: UiDump) -> Optional[Node]:
         if n.content_desc.startswith(DESC_SEND) and n.clickable:
             return n
     for n in dump.nodes:
-        if n.text.startswith("Send") and n.clickable:
+        if n.text.startswith(DESC_SEND) and n.clickable:
             return n
     return None
 
