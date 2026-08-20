@@ -1,204 +1,403 @@
-# BÁO CÁO KẾ HOẠCH
-## Ứng dụng tự động gửi tin nhắn WhatsApp hàng loạt qua máy ảo Android Studio
+# BÁO CÁO KỸ THUẬT
+## Tools GUI Tin WhatsApp
 
-**Ngày lập:** 06/08/2026
-**Môi trường:** Windows, Python 3.14.5, Android SDK (emulator, adb)
+**Cập nhật:** 20/08/2026  
+**Nhánh hardening:** `fix/harden-whatsapp-automation`  
+**Nền tảng mục tiêu:** Windows + Android Studio Emulator + ADB + WhatsApp
 
 ---
 
-## 1. Mục tiêu
+## 1. Mục tiêu hệ thống
 
-Xây dựng ứng dụng desktop Windows tự động hoá quy trình gửi tin nhắn WhatsApp hàng loạt trên các máy ảo Android Studio (AVD) bằng cách tái sử dụng quy trình thao tác đã xây dựng và kiểm chứng (mở WhatsApp → tạo danh bạ → mở chat → nhập nội dung → gửi).
+Ứng dụng desktop Windows hỗ trợ:
 
-## 2. Công nghệ lựa chọn
+- quản lý Android Virtual Device (AVD);
+- khởi động AVD headless;
+- nhập/import danh sách số điện thoại;
+- tự động hoá thao tác WhatsApp qua ADB + UI hierarchy;
+- gửi text hoặc ảnh;
+- chạy worker nền không block GUI;
+- retry có kiểm soát, cancellation, progress và log theo thiết bị.
 
-| Thành phần | Lựa chọn | Lý do |
-|---|---|---|
-| Ngôn ngữ | Python 3.14.5 | Đã cài sẵn, dễ tích hợp adb |
-| GUI | PySide6 6.11 | Đã cài sẵn, giao diện chuyên nghiệp |
-| Tự động hoá | adb + uiautomator | Tái sử dụng quy trình đã kiểm chứng |
-| Import Excel/CSV | openpyxl 3.1.2 / pandas 3.0.3 | Đã cài sẵn |
-| Lưu cấu hình | JSON | Đơn giản, phổ biến |
+Dự án vẫn là UI automation phụ thuộc vào phiên bản WhatsApp/Android; không được xem selector hiện tại là API ổn định vĩnh viễn.
 
-## 3. Môi trường đã khảo sát
+---
 
-- Android SDK: `C:\Users\Admin\AppData\Local\Android\Sdk`
-- Android Studio: `C:\Program Files\Android\Android Studio` (đang chạy)
-- Emulator hỗ trợ chạy ẩn: `-no-window -no-audio -no-boot-anim`
-- 5 AVD có sẵn: `test_whatsap_-1`, `whatsapp_device_01` → `04` (đều Android 16, google_apis x86_64)
-- WhatsApp đã cài trên máy ảo, quy trình gửi tin đã kiểm chứng thành công trên `whatsapp_device_01` (emulator-5558)
+## 2. Kiến trúc hiện tại
 
-### 3.1. Resource-ID đã xác minh trên WhatsApp
-
-| Màn hình | Thành phần | Selector |
-|---|---|---|
-| EULA/Onboarding | Nút "AGREE AND CONTINUE" | `com.whatsapp:id/eula_accept` |
-| Home | Nút New chat (FAB) | `com.whatsapp:id/fab` (content-desc "New chat") |
-| ContactPicker | Mục "New contact" | text="New contact" |
-| ContactForm | Ô nhập Phone | EditText hint="Phone" |
-| ContactForm | Nút SAVE | `com.whatsapp:id/keyboard_aware_save_button` |
-| Conversation | Ô nhập tin nhắn | EditText text/hint="Message" |
-| Conversation | Nút gửi | content-desc="Send" |
-| Conversation | Nút đính kèm | content-desc="Attach" |
-| Bottom sheet | Mục Gallery | text="Gallery" |
-
-## 4. Yêu cầu tính năng
-
-### 4.1. Danh mục Danh sách thiết bị
-- Hiển thị toàn bộ máy ảo Android Studio (tên AVD, model, trạng thái, serial adb)
-- **Khởi động ẩn**: khởi động từng máy ở chế độ không màn hình (`-no-window`)
-- Khởi động có màn hình (hỗ trợ setup thủ công), Tắt máy, Làm mới
-- Tự cập nhật trạng thái định kỳ
-
-### 4.2. Danh mục Gửi tin nhắn hàng loạt
-- **QUAN TRỌNG**: Toàn bộ quy trình gửi tin nhắn hàng loạt phải thực thi khi máy ảo chạy ở chế độ **ẩn (headless, `-no-window`)** — không hiển thị màn hình. Ứng dụng tự động bắt đầu gửi **chỉ khi** thiết bị ở chế độ ẩn; nếu thiết bị đang hiển thị màn hình sẽ có cảnh báo trong log (nhưng vẫn cho phép gửi nếu người dùng xác nhận).
-- Cột trái: danh sách máy ảo; ấn vào máy nào → cột phải hiển thị cấu hình riêng cho máy đó
-- Ô nhập danh sách số điện thoại (mỗi dòng 1 số) + **Import Excel/CSV**
-- Ô nhập nội dung tin nhắn (đa dòng)
-- Thêm 1 hoặc nhiều hình ảnh gửi kèm (không bắt buộc)
-- Cấu hình khoảng cách giữa mỗi tin (giây)
-- Nút **Bắt đầu quy trình** / **Dừng**
-- **Log** hiển thị dữ liệu làm việc theo thời gian thực trên thiết bị đang chọn
-
-## 5. Kiến trúc dự án
-
-```
-tools-tu-dong-gui-tn/
-├── main.py                    # Entry point (python main.py)
-├── pyproject.toml             # Đóng gói + config pytest
-├── requirements.txt
-├── BAO_CAO.md                 # Báo cáo này
-├── app/
-│   ├── __main__.py            # python -m app
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── adb.py             # Wrapper lệnh adb cơ bản (shell, tap, swipe, text, emu kill)
-│   │   ├── uiautomator.py     # Node/UiDump, ui_dump, wait_for tìm selector
-│   │   ├── avd_manager.py     # AVDController: danh sách, khởi động ẩn/có màn hình, trạng thái, tắt
-│   │   ├── whatsapp_bot.py    # AppController / ContactManager / Messenger + WhatsAppBot facade
-│   │   ├── whatsapp_selectors.py  # Toàn bộ selector, activity, intent + hàm tìm node
-│   │   ├── data_manager.py    # Chuẩn hoá số, dọn dữ liệu, import Excel/CSV
-│   │   ├── worker.py          # BroadcastWorker (QThread): hàng đợi gửi, retry, dừng an toàn
-│   │   ├── logging_setup.py   # Logging chuẩn: file logs/<avd>.log + handler nối UI
-│   │   ├── settings.py        # Config JSON + default_settings.json (pathlib)
-│   │   └── exceptions.py      # Các lỗi chung của ứng dụng
-│   └── ui/
-│       ├── __init__.py
-│       ├── main_window.py     # Cửa sổ chính, 2 tab, lưu/khôi phục window state
-│       ├── devices_tab.py     # Danh mục danh sách thiết bị
-│       ├── broadcast_tab.py   # Danh mục gửi tin hàng loạt (chỉ hiển thị/tương tác)
-│       └── log_panel.py       # Widget hiển thị log màu theo mức, auto-scroll
-├── config/
-│   ├── default_settings.json  # Giá trị mặc định
-│   └── settings.json          # Cấu hình lưu lại (tự khởi tạo)
-├── logs/                      # Log riêng mỗi thiết bị (RotatingFileHandler)
-└── tests/
-    ├── core/
-    │   ├── test_data_manager.py
-    │   ├── test_settings.py
-    │   ├── test_uiautomator.py
-    │   ├── test_whatsapp_selectors.py
-    │   └── test_adb_avd.py
+```text
+GUI (PySide6)
+  │
+  ├── DevicesTab
+  └── BroadcastTab
+          │
+          ▼
+  BroadcastWorker (QThread)
+          │
+          ▼
+      WhatsAppBot
+      ├── AppController
+      ├── ContactManager
+      └── Messenger
+          │
+          ├── whatsapp_state
+          ├── whatsapp_selectors
+          ├── uiautomator
+          └── adb
+                  │
+                  ▼
+          Android Emulator / WhatsApp
 ```
 
-## 6. Chi tiết module
+Các module hỗ trợ:
 
-### 6.1. `core/adb.py`
-- Tự tìm adb theo `ANDROID_HOME` / `ANDROID_SDK_ROOT`
-- `devices()`, `shell(serial, cmd)`, `exec_out(serial, cmd)`, `emu_kill(serial)`
-- `tap`, `swipe`, `input_text`, `keyevent`, `wait_for_activity`, `is_boot_completed`
-- Không chứa logic phân tích UI (tách sang `uiautomator.py`)
+- `data_manager.py`: chuẩn hoá/import dữ liệu.
+- `settings.py`: config runtime + migration.
+- `paths.py`: install/user-data paths.
+- `logging_setup.py`: rotating logs + masking.
+- `exceptions.py`: error taxonomy.
 
-### 6.2. `core/uiautomator.py`
-- `Node` / `UiDump`: parse XML hierarchy → tìm node theo text/content-desc/resource-id
-- `ui_dump()`: retry khi `uiautomator dump` lỗi (đã gặp trong khảo sát)
-- `wait_for`, `wait_for_text`, `wait_for_rid`
+---
 
-### 6.3. `core/avd_manager.py`
-- `AVDController` quản lý toàn bộ lifecycle AVD (danh sách, khởi động, tắt, chờ boot)
-- `launch(avd, headless=True)`: `emulator -avd <tên> -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect` (subprocess.Popen, chạy nền, **không hiển thị màn hình**)
-- `launch(avd, headless=False)`: chế độ có màn hình (chỉ dùng để setup thủ công ban đầu)
-- `is_running_headless()`: khớp chính xác `-avd <tên>` để tránh nhầm AVD tên tương tự
-- `kill()`: ưu tiên `adb -s <serial> emu kill` rồi terminate tiến trình đã theo dõi
-- `wait_boot(serial, timeout)`: poll `sys.boot_completed`
+## 3. Thay đổi hardening chính
 
-### 6.4. `core/whatsapp_bot.py`
-Quy trình gửi tin cho từng số (tái hiện quy trình đã kiểm chứng):
-1. `WhatsAppAppController.open_app()`: khởi động `com.whatsapp/.Main`
-2. `ensure_onboarded()`: phát hiện màn EULA → bấm "AGREE AND CONTINUE" (`eula_accept`)
-3. `open_contact_picker()`: bấm FAB New chat → chờ ContactPicker
-4. `WhatsAppContactManager.create_contact(phone)`: bấm "New contact" → nhập số vào ô Phone → bấm SAVE; bỏ qua nếu số đã tồn tại
-5. `open_chat(phone)`: bấm dòng liên hệ tương ứng
-6. `WhatsAppMessenger.send_text(message)`: bấm ô Message → nhập nội dung → bấm Send
-7. `send_with_image(images, message)`: `adb push` ảnh → Attach → Gallery → chọn ảnh → (caption) → Send
-8. Nghỉ theo khoảng cách cấu hình → chuyển số kế tiếp
+### 3.1 Repository hygiene
 
-Toàn bộ selector, activity, intent tập trung tại `whatsapp_selectors.py`. Tất cả bước có `ui_dump` + timeout + retry, lỗi ném kèm ngữ cảnh để ghi log.
+Đã loại khỏi Git tracking:
 
-### 6.5. `core/data_manager.py`
-- `normalize_phone()`: lọc chỉ giữ ký tự số
-- `clean_phone_text()`: dọn từng dòng dữ liệu nhập tay
-- `import_phones_from_file()`: đọc Excel/CSV, tự nhận diện cột số điện thoại
+- `build/`;
+- `dist/`;
+- `logs/`;
+- `__pycache__/`;
+- `config/settings.json`.
 
-### 6.6. `core/worker.py`
-- `BroadcastWorker` (QThread): mỗi máy ảo 1 worker riêng, chạy song song không treo UI
-- Retry theo lỗi WhatsAppError, dừng an toàn giữa các tin, đếm thành công/thất bại
-- Cảnh báo nếu thiết bị chạy CÓ màn hình (yêu cầu chạy ẩn `-no-window`)
-- Dùng `logging` chuẩn: file `logs/<avd>.log` (RotatingFileHandler) + handler nối UI
+`.gitignore` giữ các artifact/runtime file ngoài repository.
 
-### 6.7. `core/settings.py`
-- Lưu/nạp JSON bằng `pathlib.Path`, tự khởi tạo `config/settings.json` từ `default_settings.json`
-- Cấu hình riêng từng thiết bị + lưu/khôi phục window state, tab đang chọn
+### 3.2 Packaging an toàn hơn
 
-## 7. Thiết kế giao diện
+PyInstaller chỉ bundle:
 
-### 7.1. Tab "Danh sách thiết bị"
-- Thanh công cụ: Làm mới | Khởi động ẩn | Khởi động có màn hình | Tắt máy
-- Bảng: Tên AVD | Model | Trạng thái | Serial adb
-- Tự làm mới trạng thái mỗi 5 giây
-
-### 7.2. Tab "Gửi tin nhắn hàng loạt"
-- QSplitter: trái = danh sách máy ảo, phải = panel cấu hình của máy đang chọn
-- Panel cấu hình:
-  - Header: tên + trạng thái thiết bị
-  - Danh sách số điện thoại (mỗi dòng 1 số) + nút Import Excel/CSV + nút Dọn dữ liệu
-  - Nội dung tin nhắn (đa dòng)
-  - Hình ảnh kèm (không bắt buộc): danh sách ảnh + Thêm ảnh + Xoá
-  - Khoảng cách giữa mỗi tin (SpinBox 0–600 giây)
-  - Nút Bắt đầu quy trình / Dừng
-  - Log panel: màu theo mức (thông tin/thành công/lỗi), auto-scroll, ghi ra `logs/<thiết bị>.log`
-  - Tiến trình: progress bar + "đã gửi x/y"
-
-## 8. Xử lý dữ liệu số điện thoại
-
-- Import Excel/CSV: đọc sheet đầu tiên, tự nhận diện cột chứa số (ô dạng số > 50%), đổ mỗi số vào 1 dòng
-- Nút "Dọn dữ liệu": lọc chỉ giữ ký tự số, bỏ khoảng trắng/dấu `+`/`-`
-- Chuẩn hoá: 11 chữ số bắt đầu bằng 1 → định dạng US; còn lại giữ nguyên dãy số
-
-## 9. Kế hoạch kiểm thử
-
-1. List AVD + khởi động ẩn `whatsapp_device_01` (`-no-window`) → xác nhận boot xong, **không có cửa sổ hiển thị**
-2. Gửi thử 1 số, nội dung "hello" (không ảnh) — toàn bộ trong chế độ ẩn
-3. Gửi thử 1 số kèm 1 ảnh — chế độ ẩn
-4. Gửi batch 2 số, khoảng cách 3 giây → kiểm log, thứ tự, nút Dừng
-5. Import file Excel có sẵn trong thư mục dự án
-
-## 10. Lưu ý / rủi ro
-
-| Rủi ro | Giải pháp |
-|---|---|
-| Máy ảo mới chưa đăng ký WhatsApp | Setup thủ công 1 lần (nhập số, nhận mã SMS) rồi snapshot; tool tự xử lý màn EULA |
-| `adb input text` không gõ được tiếng Việt/unicode | Cài ADBKeyboard trên máy ảo để gõ đầy đủ; fallback `%s` cho khoảng trắng |
-| `uiautomator dump` lỗi ngẫu nhiên | Cơ chế retry + timeout |
-| WhatsApp cập nhật giao diện | Tập trung toàn bộ selector vào `whatsapp_selectors.py` để dễ bảo trì |
-| Gửi nhiều máy đồng thời | Worker thread riêng từng máy, adb theo serial |
-
-## 11. Kiểm thử tự động
-
-Chạy bộ test với pytest:
-
-```bash
-python -m pytest
+```text
+config/default_settings.json
 ```
 
-Bao phủ: chuẩn hoá/import số điện thoại, settings (default + roundtrip), parse UI hierarchy & retry, selector WhatsApp, phát hiện đường dẫn adb và khớp `is_running_headless` chính xác.
+Không bundle `settings.json` người dùng.
+
+UPX tắt mặc định để giảm khác biệt build giữa các máy.
+
+### 3.3 ADB command execution
+
+`adb.py` có `CommandResult` để phân biệt:
+
+- thành công;
+- executable không tồn tại;
+- timeout;
+- non-zero exit code;
+- stdout/stderr.
+
+Các thao tác quan trọng có thể dùng `check=True` để raise `ADBError` thay vì biến mọi lỗi thành output rỗng.
+
+### 3.4 Text input
+
+Dữ liệu người dùng được truyền bằng argument riêng qua `shell_args()` thay vì tự ghép shell string.
+
+Không còn logic tự:
+
+- đổi space thành `%s` ở tầng WhatsApp;
+- escape riêng `&` / `|`;
+- xóa dấu `'`.
+
+ADBKeyboard vẫn là đường ưu tiên cho Unicode nếu được cài trên AVD.
+
+### 3.5 Multi-image correctness
+
+Workflow cũ push nhiều ảnh nhưng chỉ chọn thumbnail đầu tiên rồi log như đã gửi đủ N ảnh.
+
+Workflow hiện tại gửi **tuần tự từng ảnh**:
+
+```text
+push → media scan → Attach → Gallery → thumbnail → Send
+```
+
+Caption chỉ gắn vào ảnh đầu tiên.
+
+Nếu đã gửi một phần ảnh rồi gặp lỗi, `PartialSendError` ngăn worker retry toàn recipient để tránh gửi trùng nội dung đã thành công.
+
+### 3.6 Selector hardening
+
+Selector ưu tiên:
+
+```text
+resource-id → content-desc/hint → text → heuristic
+```
+
+Fallback tọa độ Phone cố định đã bị loại bỏ. Nếu không tìm thấy field bằng selector an toàn, workflow fail rõ ràng.
+
+### 3.7 State-aware navigation
+
+`whatsapp_state.py` nhận diện trạng thái từ top activity:
+
+- HOME;
+- CONTACT_PICKER;
+- CONTACT_FORM;
+- CONVERSATION;
+- OTHER_WHATSAPP;
+- UNKNOWN.
+
+Tích hợp hiện tại mang tính bảo thủ:
+
+- đang ở HOME → bỏ qua restart WhatsApp;
+- đang ở ContactPicker → bỏ qua bấm New Chat;
+- trạng thái khác → giữ đường xử lý cũ.
+
+### 3.8 Retry / circuit breaker / pacing
+
+Worker có:
+
+- retry count;
+- retry backoff tăng theo attempt;
+- circuit breaker sau nhiều recipient lỗi liên tiếp;
+- success reset failure streak;
+- minimum interval 1 giây giữa recipient;
+- blank phone bị loại khỏi total thực tế.
+
+### 3.9 Cancellation
+
+Nút Dừng không chỉ set flag ở vòng ngoài.
+
+Callback cancellation được truyền qua:
+
+```text
+BroadcastWorker
+→ WhatsAppBot/controllers
+→ ui.wait_for / ui_dump
+→ adb.wait_for_activity
+```
+
+Do đó worker có thể dừng tại checkpoint gần nhất thay vì buộc chờ hết mọi timeout UI.
+
+### 3.10 Diagnostic privacy
+
+Số điện thoại trong worker/ContactManager log được mask, ví dụ:
+
+```text
+849******21
+```
+
+Message body không được ghi nguyên văn vào diagnostic log của worker.
+
+---
+
+## 4. Runtime data path
+
+Runtime data không còn ghi cạnh source/EXE.
+
+Windows mặc định:
+
+```text
+%LOCALAPPDATA%\ToolsGuiTinWhatsApp\
+├── config\
+│   ├── default_settings.json
+│   └── settings.json
+└── logs\
+    └── <avd>.log
+```
+
+Có thể override:
+
+```text
+TOOLS_GUI_TN_DATA_DIR
+```
+
+### Migration
+
+Nếu runtime settings mới chưa tồn tại nhưng có legacy `config/settings.json` cạnh source/EXE:
+
+- JSON hợp lệ được copy sang user-data;
+- bản legacy không bị xóa;
+- settings mới hiện hữu không bị ghi đè;
+- legacy JSON lỗi → fallback defaults.
+
+---
+
+## 5. Dependency management
+
+Nguồn chuẩn là `pyproject.toml`.
+
+### Runtime
+
+- PySide6
+- openpyxl
+- pandas
+
+### Dev
+
+- pytest
+- Ruff
+
+### Build
+
+- PyInstaller
+
+`requirements.txt` chỉ còn compatibility entry point trỏ về package hiện tại.
+
+---
+
+## 6. Test suite
+
+Test hiện bao phủ các nhóm quan trọng:
+
+- ADB path + command result/error;
+- AVD parsing/headless detection;
+- data cleaning/import;
+- settings + migration;
+- user-data path resolution;
+- UI hierarchy parsing;
+- cancellation-aware UI waits;
+- selector priority/fallback;
+- WhatsApp state detection;
+- orchestration text/media;
+- Unicode/special-character text input;
+- sequential multi-image;
+- partial-send duplicate prevention;
+- worker retry/backoff;
+- circuit breaker;
+- worker cancellation;
+- minimum pacing;
+- phone masking.
+
+---
+
+## 7. CI / Build verification
+
+Workflow `.github/workflows/tests.yml` được cấu hình trên Windows để chạy:
+
+```text
+Ruff
+→ pytest
+→ python -m app --self-test
+→ PyInstaller build
+→ packaged EXE --self-test
+```
+
+Lưu ý: việc workflow được cấu hình không đồng nghĩa mọi run tương lai luôn pass. Kết quả Actions của commit/PR phải được kiểm tra trước khi merge/release.
+
+---
+
+## 8. Baseline tương thích
+
+Khảo sát lịch sử ngày 06/08/2026 ghi nhận:
+
+- Windows host;
+- Android SDK tại user LocalAppData;
+- Android 16 Google APIs x86_64;
+- các AVD `test_whatsap_-1`, `whatsapp_device_01` → `04`;
+- workflow từng được xác minh trên `whatsapp_device_01`.
+
+Đây là baseline lịch sử, không phải chứng nhận compatibility hiện tại sau mỗi WhatsApp update.
+
+Chi tiết xem:
+
+```text
+docs/COMPATIBILITY.md
+```
+
+---
+
+## 9. Rủi ro còn lại
+
+### 9.1 WhatsApp UI thay đổi
+
+Resource-id/content-desc/text có thể thay đổi sau update.
+
+Giải pháp:
+
+- giữ selector tập trung;
+- fixture/regression test;
+- retest một recipient trước batch lớn;
+- không quay lại coordinate fallback nếu chưa có device profile được xác minh.
+
+### 9.2 Media picker khác nhau giữa Android image
+
+Workflow hiện dùng sequential image send vì đó là hành vi có thể kiểm soát tốt hơn với selector đã xác minh.
+
+Album/multi-select thật sự chỉ nên triển khai sau khi có UI fixture trên môi trường mục tiêu.
+
+### 9.3 ADB shell Unicode
+
+ADBKeyboard là đường ưu tiên. Fallback `input text` có thể khác nhau giữa Android image/IME.
+
+### 9.4 Automation throughput
+
+Quy trình vẫn tạo/tìm contact và navigation UI tương đối nhiều. Tối ưu session/contact cache thuộc giai đoạn P3 sau khi reliability layer ổn định.
+
+---
+
+## 10. Trạng thái roadmap
+
+### P0 — Correctness / safety
+
+Đã triển khai chính:
+
+- repository cleanup;
+- safe config bundling;
+- explicit ADB errors;
+- safe text input;
+- multi-image correctness;
+- explicit settings initialization;
+- partial-send duplicate prevention.
+
+### P1 — Reliability
+
+Đã triển khai chính:
+
+- selector priority;
+- loại fixed coordinate;
+- state detection/navigation guard;
+- retry backoff;
+- circuit breaker;
+- cancellation propagation;
+- minimum pacing;
+- worker/bot/media tests;
+- CI + Ruff;
+- diagnostic masking.
+
+### P2 — Maintainability / packaging
+
+Đã triển khai phần lớn:
+
+- user-data paths;
+- migration legacy settings;
+- dependency consolidation;
+- PyInstaller hardening;
+- README;
+- compatibility documentation;
+- cập nhật báo cáo này.
+
+### P3 — Optimization
+
+Chưa hoàn tất, gồm các hướng chính:
+
+- contact resolution strategy;
+- contact cache per device;
+- reuse WhatsApp session giữa recipient;
+- device/broadcast preflight;
+- structured result model;
+- CSV/XLSX result export;
+- integration tests với emulator thật.
+
+---
+
+## 11. Kết luận kỹ thuật
+
+Kiến trúc nền ban đầu được giữ lại vì separation giữa GUI / worker / WhatsApp controllers / selector / ADB là hợp lý.
+
+Hardening tập trung vào correctness, observability và fail-safe behavior thay vì viết lại toàn bộ ứng dụng.
+
+Sau P0–P2, dự án có nền tảng tốt hơn rõ rệt để bước sang P3. Tuy nhiên trước khi release cho batch thực tế vẫn cần:
+
+1. CI run xanh trên commit/PR mục tiêu.
+2. Build EXE thành công trên Windows.
+3. Smoke test trên AVD thật.
+4. Retest selector với WhatsApp version đang sử dụng.
+5. Test một recipient text và một recipient media trước batch lớn.
