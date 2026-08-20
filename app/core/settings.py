@@ -1,30 +1,15 @@
-"""Lưu/nạp cấu hình JSON - khởi tạo tường minh tại application startup."""
+"""Lưu/nạp cấu hình JSON trong thư mục dữ liệu người dùng."""
 import json
-import sys
-from pathlib import Path
 
+from . import paths
 from .exceptions import ConfigError
 
 
-def _base_dir() -> Path:
-    """Thư mục gốc chứa config: cạnh exe khi đóng băng, nếu không là thư mục dự án."""
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parents[2]
-
-
-def _bundle_config(name: str) -> Path | None:
-    """Đường dẫn file cấu hình trong bundle _MEIPASS khi chạy dạng exe onefile."""
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        return Path(meipass) / "config" / name
-    return None
-
-
-BASE_DIR = _base_dir()
-CONFIG_DIR = BASE_DIR / "config"
+BASE_DIR = paths.user_data_dir()
+CONFIG_DIR = paths.config_dir()
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 DEFAULT_SETTINGS_FILE = CONFIG_DIR / "default_settings.json"
+LEGACY_SETTINGS_FILE = paths.legacy_config_dir() / "settings.json"
 
 _DEFAULT_DATA = {
     "geometry": None,
@@ -34,9 +19,26 @@ _DEFAULT_DATA = {
 }
 
 
+def _bundle_config(name: str):
+    """Wrapper giữ tương thích test/call-site cũ."""
+    return paths.bundled_config_file(name)
+
+
+def _installed_config(name: str):
+    return paths.installed_config_file(name)
+
+
+def _default_candidates():
+    """Ưu tiên bản runtime, rồi bundle onefile, cuối cùng config của source/install."""
+    return (
+        DEFAULT_SETTINGS_FILE,
+        _bundle_config("default_settings.json"),
+        _installed_config("default_settings.json"),
+    )
+
+
 def _defaults() -> dict:
-    # Ưu tiên bản mặc định cạnh exe, fallback sang bản trong bundle (khi exe onefile)
-    for candidate in (DEFAULT_SETTINGS_FILE, _bundle_config("default_settings.json")):
+    for candidate in _default_candidates():
         if candidate is None:
             continue
         try:
@@ -49,21 +51,50 @@ def _defaults() -> dict:
     return dict(_DEFAULT_DATA)
 
 
-def ensure_config() -> None:
-    """Tạo thư mục config/ và settings.json nếu chưa có.
+def _copy_default_to_runtime() -> None:
+    if DEFAULT_SETTINGS_FILE.exists():
+        return
+    for candidate in (
+        _bundle_config("default_settings.json"),
+        _installed_config("default_settings.json"),
+    ):
+        if candidate is None:
+            continue
+        try:
+            if candidate.exists():
+                DEFAULT_SETTINGS_FILE.write_text(
+                    candidate.read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+                return
+        except OSError:
+            continue
 
-    Khi chạy exe onefile: sao chép `default_settings.json` từ bundle sang cạnh exe
-    nếu chưa có. Hàm này phải được gọi tường minh tại application startup, không chạy
-    như side effect khi import module.
-    """
+
+def _migrate_legacy_settings() -> bool:
+    """Copy settings cũ cạnh source/exe sang user-data nếu hợp lệ; không xóa bản cũ."""
+    if SETTINGS_FILE.exists():
+        return False
+    legacy = LEGACY_SETTINGS_FILE
+    try:
+        if not legacy.exists() or legacy.resolve() == SETTINGS_FILE.resolve():
+            return False
+        with open(legacy, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return False
+        save_settings(data)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def ensure_config() -> None:
+    """Khởi tạo config runtime và migrate settings cũ một lần nếu có."""
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        if not DEFAULT_SETTINGS_FILE.exists():
-            bundled = _bundle_config("default_settings.json")
-            if bundled is not None and bundled.exists():
-                DEFAULT_SETTINGS_FILE.write_text(
-                    bundled.read_text(encoding="utf-8"), encoding="utf-8")
-        if not SETTINGS_FILE.exists():
+        _copy_default_to_runtime()
+        if not SETTINGS_FILE.exists() and not _migrate_legacy_settings():
             save_settings(_defaults())
     except OSError as e:
         raise ConfigError(f"Không khởi tạo được cấu hình: {e}") from e
