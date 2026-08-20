@@ -139,7 +139,10 @@ class WhatsAppContactManager(_Base):
 
         phone_field = ui.wait_for(self.serial, lambda d: sel.find_phone_field(d), timeout=10)
         if phone_field is None:
-            phone_field = sel.FallbackCoord(sel.FALLBACK_PHONE_COORD)
+            raise WhatsAppError(
+                "Không tìm thấy ô Phone bằng selector an toàn; "
+                "không sử dụng tọa độ cố định để tránh tap nhầm."
+            )
         adb.tap(self.serial, *phone_field.center)
         time.sleep(0.5)
         self.type_text(phone_digits)
@@ -228,7 +231,7 @@ class WhatsAppMessenger(_Base):
         adb.tap(self.serial, *attach.center)
         time.sleep(2)
 
-        gallery = ui.wait_for_text(self.serial, sel.TEXT_GALLERY, timeout=8)
+        gallery = ui.wait_for(self.serial, lambda d: sel.find_gallery_entry(d), timeout=8)
         if gallery is None:
             raise WhatsAppError(f"Không tìm thấy mục Gallery khi gửi ảnh {index + 1}")
         adb.tap(self.serial, *gallery.center)
