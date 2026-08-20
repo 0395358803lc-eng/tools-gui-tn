@@ -1,5 +1,10 @@
-"""Test phát hiện đường dẫn adb và thông tin AVD."""
+"""Test phát hiện đường dẫn adb, thực thi lệnh và thông tin AVD."""
+import subprocess
+
+import pytest
+
 from app.core import adb
+from app.core.exceptions import ADBError
 
 
 def test_adb_path_with_env(monkeypatch, tmp_path):
@@ -16,21 +21,89 @@ def test_adb_path_fallback_no_env(monkeypatch, tmp_path):
     assert adb.adb_path() == "adb"
 
 
+def test_run_command_success(monkeypatch):
+    completed = subprocess.CompletedProcess(
+        args=["adb", "devices"], returncode=0, stdout="ok\n", stderr="")
+    monkeypatch.setattr(adb.subprocess, "run", lambda *args, **kwargs: completed)
+
+    result = adb.run_command(["adb", "devices"])
+
+    assert result.ok is True
+    assert result.returncode == 0
+    assert result.stdout == "ok\n"
+    assert result.stderr == ""
+    assert result.output == "ok\n"
+
+
+def test_run_command_nonzero_is_explicit(monkeypatch):
+    completed = subprocess.CompletedProcess(
+        args=["adb", "bad"], returncode=1, stdout="", stderr="bad command")
+    monkeypatch.setattr(adb.subprocess, "run", lambda *args, **kwargs: completed)
+
+    result = adb.run_command(["adb", "bad"])
+
+    assert result.ok is False
+    assert result.returncode == 1
+    assert result.stderr == "bad command"
+    with pytest.raises(ADBError, match="exit=1"):
+        result.raise_for_error()
+
+
+def test_run_command_not_found_is_explicit(monkeypatch):
+    def fake_run(*args, **kwargs):
+        raise FileNotFoundError("adb missing")
+
+    monkeypatch.setattr(adb.subprocess, "run", fake_run)
+    result = adb.run_command(["adb", "devices"])
+
+    assert result.ok is False
+    assert result.not_found is True
+    assert result.returncode is None
+    with pytest.raises(ADBError, match="Không tìm thấy"):
+        result.raise_for_error()
+
+
+def test_run_command_timeout_is_explicit(monkeypatch):
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=["adb", "devices"], timeout=3, output="partial", stderr="slow")
+
+    monkeypatch.setattr(adb.subprocess, "run", fake_run)
+    result = adb.run_command(["adb", "devices"], timeout=3)
+
+    assert result.ok is False
+    assert result.timed_out is True
+    assert result.stdout == "partial"
+    assert result.stderr == "slow"
+    with pytest.raises(ADBError, match="hết thời gian"):
+        result.raise_for_error()
+
+
+def test_run_check_raises_on_failure(monkeypatch):
+    result = adb.CommandResult(args=("adb", "bad"), returncode=2, stderr="failed")
+    monkeypatch.setattr(adb, "run_command", lambda args, timeout=30: result)
+
+    with pytest.raises(ADBError, match="exit=2"):
+        adb._run(["adb", "bad"], check=True)
+
+
 def test_emu_kill_builds_command(monkeypatch):
     captured = {}
 
-    def fake_run(args, timeout=30):
+    def fake_run(args, timeout=30, **kwargs):
         captured["args"] = args
+        captured["check"] = kwargs.get("check")
         return ""
 
     monkeypatch.setattr(adb, "_run", fake_run)
     adb.emu_kill("emulator-5554")
     assert captured["args"] == [adb.adb_path(), "-s", "emulator-5554", "emu", "kill"]
+    assert captured["check"] is True
 
 
 def test_devices_parsing(monkeypatch):
     fake_out = "List of devices attached\nemulator-5554\tdevice\nemulator-5556\toffline\n"
-    monkeypatch.setattr(adb, "_run", lambda args, timeout=30: fake_out)
+    monkeypatch.setattr(adb, "_run", lambda args, timeout=30, **kwargs: fake_out)
     assert adb.devices() == ["emulator-5554"]
 
 
