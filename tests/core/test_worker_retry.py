@@ -1,4 +1,4 @@
-"""Regression tests cho retry/cancellation policy của BroadcastWorker."""
+"""Regression tests cho retry/cancellation/pacing policy của BroadcastWorker."""
 import logging
 
 from app.core import worker as wk
@@ -110,6 +110,7 @@ def test_circuit_breaker_stops_after_consecutive_failures(monkeypatch):
         retries=0,
         retry_backoff=0,
         max_consecutive_failures=2,
+        minimum_interval=0,
     )
     broadcast.run()
     assert calls == ["1111111", "2222222"]
@@ -143,6 +144,7 @@ def test_success_resets_circuit_breaker_streak(monkeypatch):
         retries=0,
         retry_backoff=0,
         max_consecutive_failures=2,
+        minimum_interval=0,
     )
     broadcast.run()
     assert calls == ["1111111", "2222222", "3333333", "4444444"]
@@ -188,7 +190,69 @@ def test_worker_passes_cancel_callback_and_stops_without_retry(monkeypatch):
         phones=["1111111", "2222222"],
         interval=0,
     )
-    broadcast = wk.BroadcastWorker(config, "emulator-5554", retries=3, retry_backoff=0)
+    broadcast = wk.BroadcastWorker(
+        config,
+        "emulator-5554",
+        retries=3,
+        retry_backoff=0,
+        minimum_interval=0,
+    )
+    broadcast.run()
+    assert calls == ["1111111"]
+
+
+def test_zero_config_interval_is_clamped_to_minimum(monkeypatch):
+    _prepare_worker(monkeypatch)
+    calls = []
+    sleeps = []
+
+    class FakeBot:
+        def __init__(self, serial, logger=None, cancelled=None):
+            pass
+
+        def send_bulk(self, phone, message, images):
+            calls.append(phone)
+
+    monkeypatch.setattr(wk, "WhatsAppBot", FakeBot)
+    config = wk.SendConfig(
+        avd_name="avd_1",
+        phones=["1111111", "2222222"],
+        interval=0,
+    )
+    broadcast = wk.BroadcastWorker(
+        config,
+        "emulator-5554",
+        retry_backoff=0,
+        minimum_interval=1.0,
+    )
+    monkeypatch.setattr(broadcast, "_sleep_interval", lambda seconds: sleeps.append(seconds))
+
     broadcast.run()
 
-    assert calls == ["1111111"]
+    assert calls == ["1111111", "2222222"]
+    assert sleeps == [1.0]
+
+
+def test_configured_interval_above_minimum_is_preserved(monkeypatch):
+    _prepare_worker(monkeypatch)
+    sleeps = []
+
+    class FakeBot:
+        def __init__(self, serial, logger=None, cancelled=None):
+            pass
+
+        def send_bulk(self, phone, message, images):
+            pass
+
+    monkeypatch.setattr(wk, "WhatsAppBot", FakeBot)
+    config = wk.SendConfig(
+        avd_name="avd_1",
+        phones=["1111111", "2222222"],
+        interval=7,
+    )
+    broadcast = wk.BroadcastWorker(config, "emulator-5554", minimum_interval=1.0)
+    monkeypatch.setattr(broadcast, "_sleep_interval", lambda seconds: sleeps.append(seconds))
+
+    broadcast.run()
+
+    assert sleeps == [7.0]
