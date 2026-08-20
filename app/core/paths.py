@@ -46,6 +46,10 @@ def logs_dir() -> Path:
     return user_data_dir() / "logs"
 
 
+def reports_dir() -> Path:
+    return user_data_dir() / "reports"
+
+
 def legacy_config_dir() -> Path:
     """Vị trí settings cũ cạnh source/exe, chỉ dùng cho migration đọc một lần."""
     return install_dir() / "config"
