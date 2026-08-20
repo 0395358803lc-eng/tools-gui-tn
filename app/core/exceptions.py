@@ -17,6 +17,10 @@ class WhatsAppError(AppError):
     """Lỗi trong quy trình tự động hoá WhatsApp."""
 
 
+class PartialSendError(WhatsAppError):
+    """Đã gửi một phần nội dung; không được retry toàn workflow để tránh gửi trùng."""
+
+
 class DataError(AppError):
     """Lỗi khi xử lý dữ liệu nhập vào (số điện thoại, file Excel/CSV)."""
 

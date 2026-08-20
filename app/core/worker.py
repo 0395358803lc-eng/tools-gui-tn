@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from PySide6.QtCore import QThread, Signal
 
 from . import avd_manager
-from .exceptions import ADBError, WhatsAppError
+from .exceptions import ADBError, PartialSendError, WhatsAppError
 from .logging_setup import attach_qt_handler, device_logger, log_success
 from .whatsapp_bot import WhatsAppBot
 
@@ -82,6 +82,12 @@ class BroadcastWorker(QThread):
                         log_success(self._logger,
                                     f"[{idx}/{total}] GỬI THÀNH CÔNG tới {phone} "
                                     f"({elapsed:.1f}s).")
+                        break
+                    except PartialSendError as e:
+                        # Một phần nội dung đã gửi thành công; retry toàn workflow sẽ tạo duplicate.
+                        last_err = e
+                        self._logger.error(
+                            f"[{idx}/{total}] Đã gửi một phần, KHÔNG retry để tránh gửi trùng: {e}")
                         break
                     except (WhatsAppError, ADBError) as e:
                         last_err = e

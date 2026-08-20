@@ -14,7 +14,7 @@ from . import adb
 from . import uiautomator as ui
 from . import whatsapp_selectors as sel
 from .data_manager import normalize_phone
-from .exceptions import WhatsAppError
+from .exceptions import ADBError, PartialSendError, WhatsAppError
 from .logging_setup import log_success
 
 ANR_PATTERN = "isn.t responding"
@@ -27,9 +27,6 @@ class _Base:
         self.serial = serial
         self._logger = logger or logging.getLogger("wa.bot")
 
-    # ------------------------------------------------------------------
-    # Log helpers
-    # ------------------------------------------------------------------
     def _info(self, msg: str) -> None:
         self._logger.info(msg)
 
@@ -42,9 +39,6 @@ class _Base:
     def _err(self, msg: str) -> None:
         self._logger.error(msg)
 
-    # ------------------------------------------------------------------
-    # Nhập văn bản (hỗ trợ tiếng Việt qua ADBKeyboard nếu có)
-    # ------------------------------------------------------------------
     def type_text(self, text: str) -> None:
         if not text:
             return
@@ -65,9 +59,6 @@ class _Base:
             check=True,
         )
 
-    # ------------------------------------------------------------------
-    # Xử lý ANR / màn hình chưa sẵn sàng
-    # ------------------------------------------------------------------
     def _ensure_screen_ready(self, attempts: int = 4) -> None:
         """Bỏ qua hộp thoại '... isn't responding' (thường gặp khi chạy ẩn chậm)."""
         for _ in range(attempts):
@@ -148,7 +139,6 @@ class WhatsAppContactManager(_Base):
 
         phone_field = ui.wait_for(self.serial, lambda d: sel.find_phone_field(d), timeout=10)
         if phone_field is None:
-            # fallback: bấm ô theo tọa độ đã xác minh
             phone_field = sel.FallbackCoord(sel.FALLBACK_PHONE_COORD)
         adb.tap(self.serial, *phone_field.center)
         time.sleep(0.5)
@@ -177,7 +167,7 @@ class WhatsAppContactManager(_Base):
                 row = sel.find_contact_row(dump, phone_digits)
                 if row:
                     break
-            adb.swipe(self.serial, 672, 2000, 672, 1000, 300)  # cuộn tìm
+            adb.swipe(self.serial, 672, 2000, 672, 1000, 300)
             time.sleep(0.5)
         if row is None:
             raise WhatsAppError(f"Không tìm thấy liên hệ {phone_digits} trong danh bạ")
@@ -209,19 +199,22 @@ class WhatsAppMessenger(_Base):
         self._ok("Đã gửi tin nhắn.")
 
     def send_with_image(self, images: list[str], message: str) -> None:
-        """Gửi từng ảnh tuần tự để số ảnh log luôn khớp với số ảnh thực sự đã gửi.
-
-        Media picker hiện chỉ có selector đã xác minh cho thumbnail đầu tiên. Thay vì
-        giả định có thể multi-select rồi báo thành công sai, mỗi ảnh được push/scan và
-        gửi trong một lượt riêng. Caption chỉ gắn vào ảnh đầu tiên để tránh lặp nội dung.
-        """
+        """Gửi từng ảnh tuần tự; không retry toàn workflow sau partial success."""
         if not images:
             raise WhatsAppError("Danh sách ảnh rỗng")
 
         sent = 0
         for index, path in enumerate(images):
             caption = message if index == 0 else ""
-            self._send_single_image(path, caption, index=index)
+            try:
+                self._send_single_image(path, caption, index=index)
+            except (WhatsAppError, ADBError) as exc:
+                if sent > 0:
+                    raise PartialSendError(
+                        f"Đã gửi {sent}/{len(images)} ảnh; lỗi tại ảnh {index + 1}. "
+                        f"Dừng retry để tránh gửi trùng. Chi tiết: {exc}"
+                    ) from exc
+                raise
             sent += 1
             self._ok(f"Đã gửi ảnh {sent}/{len(images)}.")
         self._ok(f"Đã gửi đủ {sent}/{len(images)} ảnh.")
@@ -271,7 +264,6 @@ class WhatsAppMessenger(_Base):
     def _push_image(self, path: str, *, index: int) -> str:
         local = Path(path)
         suffix = local.suffix.lower() or ".jpg"
-        # Tên duy nhất + touch giúp media vừa thêm có thứ tự mới nhất trong picker.
         unique = time.time_ns()
         dest = f"/sdcard/Pictures/wa_send_{index}_{unique}{suffix}"
         self._info(f"Đẩy ảnh {index + 1} lên thiết bị...")
