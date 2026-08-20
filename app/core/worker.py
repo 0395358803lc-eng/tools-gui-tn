@@ -12,6 +12,7 @@ from .exceptions import ADBError, PartialSendError, WhatsAppError
 from .logging_setup import attach_qt_handler, device_logger, log_success, mask_phone
 from .preflight import run_device_preflight, validate_broadcast_inputs
 from .whatsapp_bot import WhatsAppBot
+from .whatsapp_state import return_home_best_effort
 
 
 @dataclass
@@ -128,6 +129,16 @@ class BroadcastWorker(QThread):
                         break
                     try:
                         bot.send_bulk(phone, self.config.message, self.config.images)
+                        if not self._stop:
+                            reused = return_home_best_effort(
+                                self.serial,
+                                cancelled=lambda: self._stop,
+                            )
+                            if not reused:
+                                self._logger.warning(
+                                    "Không đưa được WhatsApp về HOME sau khi gửi; "
+                                    "recipient kế tiếp sẽ fallback về workflow restart."
+                                )
                         ok += 1
                         success = True
                         elapsed = time.monotonic() - t_phone
@@ -185,7 +196,8 @@ class BroadcastWorker(QThread):
                         if self.config.interval < self.minimum_interval:
                             self._logger.info(
                                 f"Interval yêu cầu {self.config.interval}s thấp hơn mức tối thiểu; "
-                                f"dùng {delay:.1f}s.")
+                                f"dùng {delay:.1f}s."
+                            )
                         else:
                             self._logger.info(f"Nghỉ {delay:.1f} giây trước tin kế tiếp...")
                         self._sleep_interval(delay)
