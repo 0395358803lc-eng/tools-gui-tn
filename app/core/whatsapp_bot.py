@@ -16,6 +16,7 @@ from . import whatsapp_selectors as sel
 from .data_manager import normalize_phone
 from .exceptions import ADBError, PartialSendError, WhatsAppError
 from .logging_setup import log_success, mask_phone
+from .whatsapp_state import WhatsAppState, detect_state
 
 ANR_PATTERN = "isn.t responding"
 
@@ -116,6 +117,10 @@ class WhatsAppAppController(_Base):
 
     def open_app(self) -> None:
         self._ensure_not_cancelled()
+        if detect_state(self.serial) is WhatsAppState.HOME:
+            self._info("WhatsApp đã ở màn hình chính, bỏ qua khởi động lại.")
+            return
+
         self._info("Mở ứng dụng WhatsApp...")
         adb.shell(self.serial, f"am force-stop {sel.PKG}", timeout=15)
         time.sleep(1)
@@ -149,6 +154,10 @@ class WhatsAppAppController(_Base):
 
     def open_contact_picker(self) -> None:
         self._ensure_not_cancelled()
+        if detect_state(self.serial) is WhatsAppState.CONTACT_PICKER:
+            self._info("WhatsApp đã ở ContactPicker, bỏ qua thao tác New chat.")
+            return
+
         self._info("Mở danh sách chọn liên hệ...")
         self._ensure_screen_ready()
         dump = ui.ui_dump(self.serial, cancelled=self._cancelled)
