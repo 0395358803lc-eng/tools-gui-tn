@@ -46,6 +46,14 @@ def test_ui_dump_returns_none_after_failures(monkeypatch):
     assert ui.ui_dump("emulator-5554", retries=2, delay=0) is None
 
 
+def test_ui_dump_honors_cancel_before_adb(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ui.adb, "exec_out", lambda *args, **kwargs: calls.append(args) or SAMPLE_XML)
+
+    assert ui.ui_dump("emulator-5554", cancelled=lambda: True) is None
+    assert calls == []
+
+
 def test_find_and_find_all(monkeypatch):
     monkeypatch.setattr(ui.adb, "exec_out", lambda serial, cmd, timeout=25: SAMPLE_XML)
     dump = ui.ui_dump("emulator-5554")
@@ -66,3 +74,31 @@ def test_wait_for_text(monkeypatch):
     monkeypatch.setattr(ui.adb, "exec_out", lambda serial, cmd, timeout=25: SAMPLE_XML)
     node = ui.wait_for_text("emulator-5554", "Chats", timeout=5)
     assert node is not None
+
+
+def test_wait_for_honors_cancel_without_dump(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ui, "ui_dump", lambda *args, **kwargs: calls.append(args) or None)
+
+    node = ui.wait_for(
+        "emulator-5554",
+        lambda dump: None,
+        timeout=5,
+        cancelled=lambda: True,
+    )
+
+    assert node is None
+    assert calls == []
+
+
+def test_wait_for_text_passes_cancel_callback(monkeypatch):
+    captured = {}
+
+    def fake_wait(serial, predicate, timeout=20.0, interval=1.0, cancelled=None):
+        captured["cancelled"] = cancelled
+        return None
+
+    marker = lambda: False
+    monkeypatch.setattr(ui, "wait_for", fake_wait)
+    ui.wait_for_text("emulator-5554", "Chats", cancelled=marker)
+    assert captured["cancelled"] is marker
