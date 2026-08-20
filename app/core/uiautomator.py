@@ -111,13 +111,16 @@ def _walk(parent: ET.Element, nodes: list[Node]) -> None:
         _walk(child, nodes)
 
 
-def ui_dump(serial: str, retries: int = 3, delay: float = 1.0) -> Optional[UiDump]:
+def ui_dump(serial: str, retries: int = 3, delay: float = 1.0,
+            cancelled: Optional[Callable[[], bool]] = None) -> Optional[UiDump]:
     """Lấy UI hierarchy. Retry vì uiautomator dump thỉnh thoảng lỗi.
 
-    Ghi cảnh báo vào logger `wa.perf` khi một lần dump mất quá lâu (giúp profiling).
+    `cancelled` cho phép worker ngừng giữa các lần dump/retry thay vì đợi hết chu kỳ.
     """
     t0 = time.monotonic()
     for attempt in range(retries):
+        if cancelled is not None and cancelled():
+            return None
         xml = adb.exec_out(serial, "uiautomator dump /dev/tty", timeout=25)
         if xml and "<hierarchy" in xml:
             end = xml.find("</hierarchy>")
@@ -132,6 +135,8 @@ def ui_dump(serial: str, retries: int = 3, delay: float = 1.0) -> Optional[UiDum
             except ET.ParseError:
                 pass
         if attempt < retries - 1:
+            if cancelled is not None and cancelled():
+                return None
             time.sleep(delay)
     _log_dump_duration(serial, time.monotonic() - t0, 0)
     return None
@@ -148,22 +153,39 @@ def _log_dump_duration(serial: str, elapsed: float, n_nodes: int) -> None:
 # ---------------------------------------------------------------------------
 
 def wait_for(serial: str, predicate: Callable[[UiDump], Optional[Node]],
-             timeout: float = 20.0, interval: float = 1.0) -> Optional[Node]:
-    """Lặp ui_dump cho tới khi predicate trả về node khác None hoặc hết giờ."""
+             timeout: float = 20.0, interval: float = 1.0,
+             cancelled: Optional[Callable[[], bool]] = None) -> Optional[Node]:
+    """Lặp ui_dump tới khi predicate match, timeout hoặc có yêu cầu hủy."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        dump = ui_dump(serial)
+        if cancelled is not None and cancelled():
+            return None
+        dump = ui_dump(serial, cancelled=cancelled)
         if dump:
             node = predicate(dump)
             if node is not None:
                 return node
+        if cancelled is not None and cancelled():
+            return None
         time.sleep(interval)
     return None
 
 
-def wait_for_text(serial: str, text: str, timeout: float = 20.0) -> Optional[Node]:
-    return wait_for(serial, lambda d: d.find(text=text), timeout=timeout)
+def wait_for_text(serial: str, text: str, timeout: float = 20.0,
+                  cancelled: Optional[Callable[[], bool]] = None) -> Optional[Node]:
+    return wait_for(
+        serial,
+        lambda d: d.find(text=text),
+        timeout=timeout,
+        cancelled=cancelled,
+    )
 
 
-def wait_for_rid(serial: str, rid: str, timeout: float = 20.0) -> Optional[Node]:
-    return wait_for(serial, lambda d: d.find(rid=rid), timeout=timeout)
+def wait_for_rid(serial: str, rid: str, timeout: float = 20.0,
+                 cancelled: Optional[Callable[[], bool]] = None) -> Optional[Node]:
+    return wait_for(
+        serial,
+        lambda d: d.find(rid=rid),
+        timeout=timeout,
+        cancelled=cancelled,
+    )
