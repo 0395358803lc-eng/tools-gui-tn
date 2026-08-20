@@ -31,13 +31,14 @@ class BroadcastWorker(QThread):
 
     def __init__(self, config: SendConfig, serial: str, retries: int = 2,
                  retry_backoff: float = 1.0, max_consecutive_failures: int = 5,
-                 parent=None):
+                 minimum_interval: float = 1.0, parent=None):
         super().__init__(parent)
         self.config = config
         self.serial = serial
         self.retries = max(0, retries)
         self.retry_backoff = max(0.0, float(retry_backoff))
         self.max_consecutive_failures = max(1, int(max_consecutive_failures))
+        self.minimum_interval = max(0.0, float(minimum_interval))
         self._stop = False
         self._logger = device_logger(config.avd_name)
         attach_qt_handler(self._logger, self._emit_log)
@@ -136,9 +137,16 @@ class BroadcastWorker(QThread):
                         f"{consecutive_failures} recipient lỗi liên tiếp.")
                     break
 
-                if idx < total and not self._stop and self.config.interval > 0:
-                    self._logger.info(f"Nghỉ {self.config.interval} giây trước tin kế tiếp...")
-                    self._sleep_interval(self.config.interval)
+                if idx < total and not self._stop:
+                    delay = max(float(self.config.interval), self.minimum_interval)
+                    if delay > 0:
+                        if self.config.interval < self.minimum_interval:
+                            self._logger.info(
+                                f"Interval yêu cầu {self.config.interval}s thấp hơn mức tối thiểu; "
+                                f"dùng {delay:.1f}s.")
+                        else:
+                            self._logger.info(f"Nghỉ {delay:.1f} giây trước tin kế tiếp...")
+                        self._sleep_interval(delay)
         except Exception as e:  # noqa: BLE001
             self._logger.error(f"LỖI worker: {e}")
         self._logger.info(
