@@ -65,7 +65,11 @@ class BroadcastWorker(QThread):
                     "CẢNH BÁO: thiết bị đang chạy CÓ màn hình. Khuyến nghị khởi động ẩn "
                     "(-no-window) trước khi gửi hàng loạt.")
 
-            bot = WhatsAppBot(self.serial, logger=self._logger)
+            bot = WhatsAppBot(
+                self.serial,
+                logger=self._logger,
+                cancelled=lambda: self._stop,
+            )
             for idx, phone in enumerate(phones, start=1):
                 if self._stop:
                     self._logger.warning("Đã dừng theo yêu cầu.")
@@ -88,16 +92,17 @@ class BroadcastWorker(QThread):
                                     f"({elapsed:.1f}s).")
                         break
                     except PartialSendError as e:
-                        # Một phần nội dung đã gửi thành công; retry toàn workflow sẽ tạo duplicate.
                         last_err = e
                         self._logger.error(
                             f"[{idx}/{total}] Đã gửi một phần, KHÔNG retry để tránh gửi trùng: {e}")
                         break
                     except (WhatsAppError, ADBError) as e:
                         last_err = e
+                        if self._stop:
+                            break
                         self._logger.warning(
                             f"[{idx}/{total}] Lần thử {attempt}/{self.retries + 1} thất bại: {e}")
-                        if attempt <= self.retries and not self._stop:
+                        if attempt <= self.retries:
                             delay = self.retry_backoff * attempt
                             if delay > 0:
                                 self._logger.info(f"Chờ {delay:.1f}s trước lần retry tiếp theo...")
@@ -106,6 +111,10 @@ class BroadcastWorker(QThread):
                         last_err = e
                         self._logger.error(f"[{idx}/{total}] LỖI tới {phone}: {e}")
                         break
+
+                if self._stop:
+                    self._logger.warning("Đã dừng theo yêu cầu.")
+                    break
 
                 elapsed = time.monotonic() - t_phone
                 if success:
