@@ -1,20 +1,16 @@
 """Cấu hình logging chuẩn Python.
 
-- File log riêng mỗi thiết bị: `logs/<avd_name>.log`
+- File log riêng mỗi thiết bị trong user-data `logs/<avd_name>.log`
 - QtLogHandler để nối log vào UI (phải emit signal từ thread làm việc)
 - Có mức level tuỳ chỉnh SUCCESS để UI hiển thị màu xanh lá
 """
 import logging
-import sys
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
 from typing import Callable
 
-if getattr(sys, "frozen", False):
-    _BASE_DIR = Path(sys.executable).resolve().parent
-else:
-    _BASE_DIR = Path(__file__).resolve().parents[2]
-LOGS_DIR = _BASE_DIR / "logs"
+from . import paths
+
+LOGS_DIR = paths.logs_dir()
 
 SUCCESS_LEVEL = 25
 logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
@@ -50,7 +46,7 @@ class QtLogHandler(logging.Handler):
 
 
 def device_logger(avd_name: str) -> logging.Logger:
-    """Logger riêng cho 1 thiết bị, ghi ra `logs/<avd_name>.log`."""
+    """Logger riêng cho 1 thiết bị, ghi ra user-data `logs/<avd_name>.log`."""
     name = f"wa.{avd_name}"
     logger = logging.getLogger(name)
     if logger.handlers:
