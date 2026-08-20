@@ -13,6 +13,7 @@ from typing import Callable, Optional
 from . import adb
 from . import uiautomator as ui
 from . import whatsapp_selectors as sel
+from .contact_resolution import ContactCache, ContactResolver
 from .data_manager import normalize_phone
 from .exceptions import ADBError, PartialSendError, WhatsAppError
 from .logging_setup import log_success, mask_phone
@@ -183,13 +184,32 @@ class WhatsAppAppController(_Base):
 class WhatsAppContactManager(_Base):
     """Tạo/lưu liên hệ và mở cuộc trò chuyện."""
 
+    def __init__(self, serial: str, logger: Optional[logging.Logger] = None,
+                 cancelled: Optional[Callable[[], bool]] = None,
+                 resolver: Optional[ContactResolver] = None):
+        super().__init__(serial, logger, cancelled=cancelled)
+        self._resolver = resolver or ContactResolver(ContactCache(serial))
+
     def create_contact(self, phone: str) -> None:
         self._ensure_not_cancelled()
         phone_digits = normalize_phone(phone)
         phone_label = mask_phone(phone_digits)
         dump = ui.ui_dump(self.serial, cancelled=self._cancelled)
-        if dump and any(sel.matches_phone(n.text, phone_digits) for n in dump.nodes):
-            self._ok(f"Số {phone_label} đã có trong danh bạ, bỏ qua tạo mới.")
+        detected_existing = bool(
+            dump and any(
+                sel.matches_phone(n.text, phone_digits)
+                or sel.matches_phone(n.content_desc, phone_digits)
+                for n in dump.nodes
+            )
+        )
+        if not self._resolver.should_create(
+            phone_digits,
+            detected_existing=detected_existing,
+        ):
+            if detected_existing:
+                self._ok(f"Số {phone_label} đã có trong danh bạ, bỏ qua tạo mới.")
+            else:
+                self._info(f"Số {phone_label} đã được xác minh trong phiên, bỏ qua tạo mới.")
             return
 
         new_contact = dump.find(text=sel.TEXT_NEW_CONTACT) if dump else None
@@ -236,6 +256,7 @@ class WhatsAppContactManager(_Base):
         if not found:
             self._ensure_not_cancelled()
             raise WhatsAppError("Lưu danh bạ xong nhưng không quay lại được màn chọn liên hệ")
+        self._resolver.mark_resolved(phone_digits)
         time.sleep(1)
         self._ok(f"Đã lưu danh bạ {phone_label}.")
 
@@ -279,6 +300,7 @@ class WhatsAppContactManager(_Base):
             if not found:
                 self._ensure_not_cancelled()
                 raise WhatsAppError("Không mở được cuộc trò chuyện")
+        self._resolver.mark_resolved(phone_digits)
         time.sleep(1)
 
 
@@ -412,8 +434,15 @@ class WhatsAppBot:
     def __init__(self, serial: str, logger: Optional[logging.Logger] = None,
                  cancelled: Optional[Callable[[], bool]] = None):
         self.serial = serial
+        self.contact_cache = ContactCache(serial)
+        resolver = ContactResolver(self.contact_cache)
         self.app = WhatsAppAppController(serial, logger, cancelled=cancelled)
-        self.contacts = WhatsAppContactManager(serial, logger, cancelled=cancelled)
+        self.contacts = WhatsAppContactManager(
+            serial,
+            logger,
+            cancelled=cancelled,
+            resolver=resolver,
+        )
         self.messenger = WhatsAppMessenger(serial, logger, cancelled=cancelled)
 
     def send_bulk(self, phone: str, message: str, images: list[str]) -> None:
