@@ -4,6 +4,7 @@ import json
 import pytest
 
 from app.core import settings
+from app.core.exceptions import ConfigError
 
 
 @pytest.fixture()
@@ -46,3 +47,36 @@ def test_window_state_roundtrip(isolated_settings):
     state = settings.get_window_state()
     assert state["geometry"] == "QUJDRA=="
     assert state["tab"] == 1
+
+
+def test_ensure_config_reports_invalid_config_directory(tmp_path, monkeypatch):
+    blocked = tmp_path / "config-is-a-file"
+    blocked.write_text("not a directory", encoding="utf-8")
+    monkeypatch.setattr(settings, "CONFIG_DIR", blocked)
+    monkeypatch.setattr(settings, "SETTINGS_FILE", blocked / "settings.json")
+    monkeypatch.setattr(settings, "DEFAULT_SETTINGS_FILE", blocked / "default_settings.json")
+
+    with pytest.raises(ConfigError, match="Không khởi tạo được cấu hình"):
+        settings.ensure_config()
+
+
+def test_load_settings_reports_invalid_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(settings, "DEFAULT_SETTINGS_FILE", tmp_path / "default_settings.json")
+    (tmp_path / "settings.json").write_text("{invalid json", encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="Đọc settings.json lỗi"):
+        settings.load_settings()
+
+
+def test_ensure_config_uses_builtin_defaults_when_default_file_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(settings, "DEFAULT_SETTINGS_FILE", tmp_path / "missing-default.json")
+    monkeypatch.setattr(settings, "_bundle_config", lambda name: None)
+
+    settings.ensure_config()
+    saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
+    assert saved["tab"] == 0
+    assert saved["devices"] == {}
