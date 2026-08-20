@@ -1,4 +1,4 @@
-"""Regression tests cho retry policy của BroadcastWorker."""
+"""Regression tests cho retry/cancellation policy của BroadcastWorker."""
 import logging
 
 from app.core import worker as wk
@@ -19,7 +19,7 @@ def test_partial_send_error_is_not_retried(monkeypatch):
     calls = []
 
     class FakeBot:
-        def __init__(self, serial, logger=None):
+        def __init__(self, serial, logger=None, cancelled=None):
             pass
 
         def send_bulk(self, phone, message, images):
@@ -35,9 +35,7 @@ def test_partial_send_error_is_not_retried(monkeypatch):
         interval=0,
     )
     broadcast = wk.BroadcastWorker(config, "emulator-5554", retries=3, retry_backoff=0)
-
     broadcast.run()
-
     assert calls == ["84900000001"]
 
 
@@ -46,7 +44,7 @@ def test_retryable_whatsapp_error_still_retries(monkeypatch):
     calls = []
 
     class FakeBot:
-        def __init__(self, serial, logger=None):
+        def __init__(self, serial, logger=None, cancelled=None):
             pass
 
         def send_bulk(self, phone, message, images):
@@ -62,9 +60,7 @@ def test_retryable_whatsapp_error_still_retries(monkeypatch):
         interval=0,
     )
     broadcast = wk.BroadcastWorker(config, "emulator-5554", retries=3, retry_backoff=0)
-
     broadcast.run()
-
     assert calls == ["84900000001", "84900000001", "84900000001"]
 
 
@@ -74,7 +70,7 @@ def test_retry_backoff_increases_by_attempt(monkeypatch):
     sleeps = []
 
     class FakeBot:
-        def __init__(self, serial, logger=None):
+        def __init__(self, serial, logger=None, cancelled=None):
             pass
 
         def send_bulk(self, phone, message, images):
@@ -85,9 +81,7 @@ def test_retry_backoff_increases_by_attempt(monkeypatch):
     config = wk.SendConfig(avd_name="avd_1", phones=["84900000001"], interval=0)
     broadcast = wk.BroadcastWorker(config, "emulator-5554", retries=2, retry_backoff=1.5)
     monkeypatch.setattr(broadcast, "_sleep_interval", lambda seconds: sleeps.append(seconds))
-
     broadcast.run()
-
     assert len(calls) == 3
     assert sleeps == [1.5, 3.0]
 
@@ -97,7 +91,7 @@ def test_circuit_breaker_stops_after_consecutive_failures(monkeypatch):
     calls = []
 
     class FakeBot:
-        def __init__(self, serial, logger=None):
+        def __init__(self, serial, logger=None, cancelled=None):
             pass
 
         def send_bulk(self, phone, message, images):
@@ -117,16 +111,13 @@ def test_circuit_breaker_stops_after_consecutive_failures(monkeypatch):
         retry_backoff=0,
         max_consecutive_failures=2,
     )
-
     broadcast.run()
-
     assert calls == ["1111111", "2222222"]
 
 
 def test_success_resets_circuit_breaker_streak(monkeypatch):
     _prepare_worker(monkeypatch)
     calls = []
-
     outcomes = {
         "1111111": False,
         "2222222": True,
@@ -136,7 +127,7 @@ def test_success_resets_circuit_breaker_streak(monkeypatch):
     }
 
     class FakeBot:
-        def __init__(self, serial, logger=None):
+        def __init__(self, serial, logger=None, cancelled=None):
             pass
 
         def send_bulk(self, phone, message, images):
@@ -145,11 +136,7 @@ def test_success_resets_circuit_breaker_streak(monkeypatch):
                 raise WhatsAppError("failed")
 
     monkeypatch.setattr(wk, "WhatsAppBot", FakeBot)
-    config = wk.SendConfig(
-        avd_name="avd_1",
-        phones=list(outcomes),
-        interval=0,
-    )
+    config = wk.SendConfig(avd_name="avd_1", phones=list(outcomes), interval=0)
     broadcast = wk.BroadcastWorker(
         config,
         "emulator-5554",
@@ -157,10 +144,7 @@ def test_success_resets_circuit_breaker_streak(monkeypatch):
         retry_backoff=0,
         max_consecutive_failures=2,
     )
-
     broadcast.run()
-
-    # Lỗi ở 111 được reset bởi thành công 222; breaker chỉ mở sau 333 + 444.
     assert calls == ["1111111", "2222222", "3333333", "4444444"]
 
 
@@ -169,7 +153,7 @@ def test_blank_phone_entries_are_ignored(monkeypatch):
     calls = []
 
     class FakeBot:
-        def __init__(self, serial, logger=None):
+        def __init__(self, serial, logger=None, cancelled=None):
             pass
 
         def send_bulk(self, phone, message, images):
@@ -178,7 +162,33 @@ def test_blank_phone_entries_are_ignored(monkeypatch):
     monkeypatch.setattr(wk, "WhatsAppBot", FakeBot)
     config = wk.SendConfig(avd_name="avd_1", phones=["", "   ", "84900000001"], interval=0)
     broadcast = wk.BroadcastWorker(config, "emulator-5554", retry_backoff=0)
+    broadcast.run()
+    assert calls == ["84900000001"]
 
+
+def test_worker_passes_cancel_callback_and_stops_without_retry(monkeypatch):
+    _prepare_worker(monkeypatch)
+    calls = []
+    captured = {}
+
+    class FakeBot:
+        def __init__(self, serial, logger=None, cancelled=None):
+            captured["cancelled"] = cancelled
+
+        def send_bulk(self, phone, message, images):
+            calls.append(phone)
+            broadcast.stop()
+            assert captured["cancelled"] is not None
+            assert captured["cancelled"]() is True
+            raise WhatsAppError("Đã dừng theo yêu cầu")
+
+    monkeypatch.setattr(wk, "WhatsAppBot", FakeBot)
+    config = wk.SendConfig(
+        avd_name="avd_1",
+        phones=["1111111", "2222222"],
+        interval=0,
+    )
+    broadcast = wk.BroadcastWorker(config, "emulator-5554", retries=3, retry_backoff=0)
     broadcast.run()
 
-    assert calls == ["84900000001"]
+    assert calls == ["1111111"]
