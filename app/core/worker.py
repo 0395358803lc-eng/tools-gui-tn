@@ -29,11 +29,15 @@ class BroadcastWorker(QThread):
     progress_signal = Signal(int, int, int)  # (done, total, ok)
     finished_signal = Signal(str, bool)    # (avd_name, success_all)
 
-    def __init__(self, config: SendConfig, serial: str, retries: int = 2, parent=None):
+    def __init__(self, config: SendConfig, serial: str, retries: int = 2,
+                 retry_backoff: float = 1.0, max_consecutive_failures: int = 5,
+                 parent=None):
         super().__init__(parent)
         self.config = config
         self.serial = serial
         self.retries = max(0, retries)
+        self.retry_backoff = max(0.0, float(retry_backoff))
+        self.max_consecutive_failures = max(1, int(max_consecutive_failures))
         self._stop = False
         self._logger = device_logger(config.avd_name)
         attach_qt_handler(self._logger, self._emit_log)
@@ -45,8 +49,10 @@ class BroadcastWorker(QThread):
         self.log_signal.emit(message, level)
 
     def run(self) -> None:
-        total = len(self.config.phones)
+        phones = [p.strip() for p in self.config.phones if p and p.strip()]
+        total = len(phones)
         ok = 0
+        consecutive_failures = 0
         t_start = time.monotonic()
         self._logger.info(
             f"===== BẮT ĐẦU gửi {total} tin trên {self.config.avd_name} =====")
@@ -60,13 +66,11 @@ class BroadcastWorker(QThread):
                     "(-no-window) trước khi gửi hàng loạt.")
 
             bot = WhatsAppBot(self.serial, logger=self._logger)
-            for idx, phone in enumerate(self.config.phones, start=1):
+            for idx, phone in enumerate(phones, start=1):
                 if self._stop:
                     self._logger.warning("Đã dừng theo yêu cầu.")
                     break
-                if not phone.strip():
-                    continue
-                phone = phone.strip()
+
                 self._logger.info(f"[{idx}/{total}] Đang gửi tới {phone}...")
                 last_err = None
                 success = False
@@ -93,15 +97,35 @@ class BroadcastWorker(QThread):
                         last_err = e
                         self._logger.warning(
                             f"[{idx}/{total}] Lần thử {attempt}/{self.retries + 1} thất bại: {e}")
+                        if attempt <= self.retries and not self._stop:
+                            delay = self.retry_backoff * attempt
+                            if delay > 0:
+                                self._logger.info(f"Chờ {delay:.1f}s trước lần retry tiếp theo...")
+                                self._sleep_interval(delay)
                     except Exception as e:  # noqa: BLE001 - lỗi không lường trước, không retry
                         last_err = e
                         self._logger.error(f"[{idx}/{total}] LỖI tới {phone}: {e}")
                         break
+
                 elapsed = time.monotonic() - t_phone
-                if not success and last_err is not None:
-                    self._logger.error(
-                        f"[{idx}/{total}] LỖI tới {phone}: {last_err} ({elapsed:.1f}s)")
+                if success:
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
+                    if last_err is not None:
+                        self._logger.error(
+                            f"[{idx}/{total}] LỖI tới {phone}: {last_err} ({elapsed:.1f}s)")
+
                 self.progress_signal.emit(idx, total, ok)
+
+                if (not success
+                        and consecutive_failures >= self.max_consecutive_failures
+                        and idx < total):
+                    self._logger.error(
+                        "CIRCUIT BREAKER: dừng batch sau "
+                        f"{consecutive_failures} recipient lỗi liên tiếp.")
+                    break
+
                 if idx < total and not self._stop and self.config.interval > 0:
                     self._logger.info(f"Nghỉ {self.config.interval} giây trước tin kế tiếp...")
                     self._sleep_interval(self.config.interval)
@@ -112,7 +136,7 @@ class BroadcastWorker(QThread):
             f"(tổng {time.monotonic() - t_start:.1f}s) =====")
         self.finished_signal.emit(self.config.avd_name, ok == total)
 
-    def _sleep_interval(self, seconds: int) -> None:
+    def _sleep_interval(self, seconds: float) -> None:
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline and not self._stop:
             time.sleep(0.2)
