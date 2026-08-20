@@ -7,6 +7,7 @@
 """
 import logging
 import time
+from pathlib import Path
 from typing import Optional
 
 from . import adb
@@ -189,7 +190,7 @@ class WhatsAppContactManager(_Base):
 
 
 class WhatsAppMessenger(_Base):
-    """Gửi tin nhắn text hoặc ảnh kèm caption."""
+    """Gửi tin nhắn text hoặc một/nhiều ảnh kèm caption."""
 
     def send_text(self, message: str) -> None:
         self._info("Nhập tin nhắn...")
@@ -208,35 +209,49 @@ class WhatsAppMessenger(_Base):
         self._ok("Đã gửi tin nhắn.")
 
     def send_with_image(self, images: list[str], message: str) -> None:
-        self._info("Đẩy ảnh lên thiết bị...")
-        self._push_images(images)
+        """Gửi từng ảnh tuần tự để số ảnh log luôn khớp với số ảnh thực sự đã gửi.
+
+        Media picker hiện chỉ có selector đã xác minh cho thumbnail đầu tiên. Thay vì
+        giả định có thể multi-select rồi báo thành công sai, mỗi ảnh được push/scan và
+        gửi trong một lượt riêng. Caption chỉ gắn vào ảnh đầu tiên để tránh lặp nội dung.
+        """
+        if not images:
+            raise WhatsAppError("Danh sách ảnh rỗng")
+
+        sent = 0
+        for index, path in enumerate(images):
+            caption = message if index == 0 else ""
+            self._send_single_image(path, caption, index=index)
+            sent += 1
+            self._ok(f"Đã gửi ảnh {sent}/{len(images)}.")
+        self._ok(f"Đã gửi đủ {sent}/{len(images)} ảnh.")
+
+    def _send_single_image(self, path: str, message: str, *, index: int) -> None:
+        remote_path = self._push_image(path, index=index)
+
         attach = ui.wait_for(self.serial, lambda d: sel.find_attach_button(d), timeout=10)
         if attach is None:
-            raise WhatsAppError("Không tìm thấy nút Attach")
+            raise WhatsAppError(f"Không tìm thấy nút Attach khi gửi ảnh {index + 1}")
         adb.tap(self.serial, *attach.center)
         time.sleep(2)
 
         gallery = ui.wait_for_text(self.serial, sel.TEXT_GALLERY, timeout=8)
         if gallery is None:
-            raise WhatsAppError("Không tìm thấy mục Gallery")
+            raise WhatsAppError(f"Không tìm thấy mục Gallery khi gửi ảnh {index + 1}")
         adb.tap(self.serial, *gallery.center)
         time.sleep(3)
 
-        # Chọn ảnh đầu tiên trong gallery (media picker). Chờ + retry vì thumbnail cần load.
         first = ui.wait_for(self.serial, lambda d: sel.find_first_media_thumbnail(d), timeout=20)
         if first is None:
-            self._warn("Chưa thấy thumbnail, quét media lại...")
-            adb.shell(self.serial,
-                      "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE "
-                      "-d file:///sdcard/Pictures/wa_send_0.jpg", timeout=15)
+            self._warn(f"Chưa thấy thumbnail ảnh {index + 1}, quét media lại...")
+            self._scan_media(remote_path)
             time.sleep(3)
             first = ui.wait_for(self.serial, lambda d: sel.find_first_media_thumbnail(d), timeout=15)
         if first is None:
-            raise WhatsAppError("Không tìm thấy ảnh trong gallery")
+            raise WhatsAppError(f"Không tìm thấy ảnh {index + 1} trong gallery")
         adb.tap(self.serial, *first.center)
         time.sleep(2)
 
-        # Nhập caption nếu có nội dung tin nhắn
         if message:
             caption = ui.wait_for(self.serial, lambda d: sel.find_caption_field(d), timeout=8)
             if caption is not None:
@@ -245,26 +260,40 @@ class WhatsAppMessenger(_Base):
                 self.type_text(message)
                 time.sleep(0.5)
             else:
-                self._warn("Không thấy ô caption, gửi ảnh không kèm nội dung.")
+                self._warn("Không thấy ô caption, gửi ảnh đầu tiên không kèm nội dung.")
 
-        # Nút gửi trong màn xem trước ảnh: content-desc "Send N media" hoặc "Send"
         send = ui.wait_for(self.serial, lambda d: sel.find_send_media_button(d), timeout=10)
         if send is None:
-            raise WhatsAppError("Không tìm thấy nút gửi ảnh")
+            raise WhatsAppError(f"Không tìm thấy nút gửi ảnh {index + 1}")
         adb.tap(self.serial, *send.center)
         time.sleep(1)
-        self._ok(f"Đã gửi ảnh ({len(images)} ảnh).")
 
-    def _push_images(self, images: list[str]) -> None:
-        for i, path in enumerate(images):
-            dest = f"/sdcard/Pictures/wa_send_{i}.jpg"
-            out = adb._run([adb.adb_path(), "-s", self.serial, "push", path, dest], timeout=60)
-            if "error" in out.lower():
-                raise WhatsAppError(f"Đẩy ảnh thất bại: {path} -> {out.strip()[:200]}")
-            adb.shell(self.serial,
-                      f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{dest}",
-                      timeout=15)
-        self._ok(f"Đã đẩy {len(images)} ảnh lên thiết bị.")
+    def _push_image(self, path: str, *, index: int) -> str:
+        local = Path(path)
+        suffix = local.suffix.lower() or ".jpg"
+        # Tên duy nhất + touch giúp media vừa thêm có thứ tự mới nhất trong picker.
+        unique = time.time_ns()
+        dest = f"/sdcard/Pictures/wa_send_{index}_{unique}{suffix}"
+        self._info(f"Đẩy ảnh {index + 1} lên thiết bị...")
+        adb._run(
+            [adb.adb_path(), "-s", self.serial, "push", path, dest],
+            timeout=60,
+            check=True,
+        )
+        adb.shell_args(self.serial, ["touch", dest], timeout=10, check=True)
+        self._scan_media(dest)
+        return dest
+
+    def _scan_media(self, remote_path: str) -> None:
+        adb.shell_args(
+            self.serial,
+            [
+                "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
+                "-d", f"file://{remote_path}",
+            ],
+            timeout=15,
+            check=True,
+        )
 
 
 class WhatsAppBot:
