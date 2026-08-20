@@ -18,6 +18,9 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.9.0",
 ]
+build = [
+    "pyinstaller>=6.0",
+]
 
 [project.gui-scripts]
 wa-tool = "app.__main__:main"
