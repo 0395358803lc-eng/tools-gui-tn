@@ -20,6 +20,17 @@ SUCCESS_LEVEL = 25
 logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
 
 
+def mask_phone(value: str, prefix: int = 3, suffix: int = 2) -> str:
+    """Che phần lớn số điện thoại trước khi ghi log/UI diagnostics."""
+    text = str(value or "")
+    if not text:
+        return ""
+    visible = max(0, prefix) + max(0, suffix)
+    if len(text) <= visible:
+        return "*" * len(text)
+    return text[:max(0, prefix)] + "*" * (len(text) - visible) + text[-max(0, suffix):]
+
+
 class QtLogHandler(logging.Handler):
     """Handler forwarding bản ghi log sang UI (message, level_lowercase)."""
 
