@@ -139,7 +139,17 @@ def devices() -> list[str]:
 
 
 def shell(serial: str, cmd: str, timeout: int = 30, *, check: bool = False) -> str:
+    """Chạy command string cố định trên Android shell.
+
+    Với dữ liệu do người dùng nhập, ưu tiên `shell_args()` để không tự ghép/escape shell.
+    """
     return _run([adb_path(), "-s", serial, "shell", cmd], timeout=timeout, check=check)
+
+
+def shell_args(serial: str, args: Sequence[str], timeout: int = 30, *, check: bool = False) -> str:
+    """Chạy Android shell bằng argument tách biệt, phù hợp cho dữ liệu người dùng."""
+    cmd = [adb_path(), "-s", serial, "shell", *(str(arg) for arg in args)]
+    return _run(cmd, timeout=timeout, check=check)
 
 
 def exec_out(serial: str, cmd: str, timeout: int = 30, *, check: bool = False) -> str:
@@ -168,7 +178,8 @@ def swipe(serial: str, x1: int, y1: int, x2: int, y2: int, duration_ms: int = 30
 
 
 def input_text(serial: str, text: str) -> None:
-    shell(serial, f"input text {text}", timeout=15, check=True)
+    """Nhập text bằng argument riêng thay vì nội suy trực tiếp vào shell command."""
+    shell_args(serial, ["input", "text", text], timeout=15, check=True)
 
 
 def keyevent(serial: str, key: str) -> None:
