@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy rotation="0">
+  <node index="0" text="" resource-id=""
+        class="android.widget.EditText" package="com.whatsapp"
+        content-desc="" hint="Message" clickable="true" enabled="true"
+        bounds="[100,1850][800,2050]" />
+  <node index="1" text="" resource-id=""
+        class="android.widget.ImageButton" package="com.whatsapp"
+        content-desc="Attach" clickable="true" enabled="true"
+        bounds="[810,1850][930,2050]" />
+  <node index="2" text="" resource-id=""
+        class="android.widget.ImageButton" package="com.whatsapp"
+        content-desc="Send" clickable="true" enabled="true"
+        bounds="[940,1850][1080,2050]" />
+</hierarchy>
