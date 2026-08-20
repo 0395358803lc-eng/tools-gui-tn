@@ -10,6 +10,7 @@ from PySide6.QtCore import QThread, Signal
 from . import avd_manager
 from .exceptions import ADBError, PartialSendError, WhatsAppError
 from .logging_setup import attach_qt_handler, device_logger, log_success, mask_phone
+from .preflight import run_device_preflight, validate_broadcast_inputs
 from .whatsapp_bot import WhatsAppBot
 
 
@@ -49,6 +50,32 @@ class BroadcastWorker(QThread):
     def _emit_log(self, message: str, level: str) -> None:
         self.log_signal.emit(message, level)
 
+    def _log_preflight(self, title: str, result) -> None:
+        self._logger.info(f"--- Preflight {title} ---")
+        for check in result.checks:
+            if check.ok:
+                self._logger.info(f"[OK] {check.code}: {check.detail}")
+            elif check.required:
+                self._logger.error(f"[FAIL] {check.code}: {check.detail}")
+            else:
+                self._logger.warning(f"[WARN] {check.code}: {check.detail}")
+
+    def _preflight_ok(self) -> bool:
+        local = validate_broadcast_inputs(
+            self.config.phones,
+            self.config.message,
+            self.config.images,
+            self.config.interval,
+        )
+        self._log_preflight("dữ liệu", local)
+        if not local.ok:
+            return False
+
+        require_unicode = any(ord(ch) > 127 for ch in (self.config.message or ""))
+        device = run_device_preflight(self.serial, require_unicode=require_unicode)
+        self._log_preflight("thiết bị", device)
+        return device.ok
+
     def run(self) -> None:
         phones = [p.strip() for p in self.config.phones if p and p.strip()]
         total = len(phones)
@@ -58,6 +85,21 @@ class BroadcastWorker(QThread):
         self._logger.info(
             f"===== BẮT ĐẦU gửi {total} tin trên {self.config.avd_name} =====")
         try:
+            if self._stop:
+                self._logger.warning("Đã dừng trước khi chạy preflight.")
+                self.finished_signal.emit(self.config.avd_name, False)
+                return
+
+            if not self._preflight_ok():
+                self._logger.error("PREFLIGHT THẤT BẠI: batch không được bắt đầu.")
+                self.finished_signal.emit(self.config.avd_name, False)
+                return
+
+            if self._stop:
+                self._logger.warning("Đã dừng sau preflight.")
+                self.finished_signal.emit(self.config.avd_name, False)
+                return
+
             headless = avd_manager.manager.is_running_headless(self.config.avd_name)
             if headless:
                 log_success(self._logger, "Thiết bị đang chạy ở chế độ ẨN (-no-window). OK.")
