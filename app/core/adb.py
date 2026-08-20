@@ -8,7 +8,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 from .exceptions import ADBError
 
@@ -203,12 +203,17 @@ def emu_kill(serial: str, timeout: int = 15) -> None:
 # Thông tin activity
 # ---------------------------------------------------------------------------
 
-def wait_for_activity(serial: str, activity_part: str, timeout: float = 20.0) -> bool:
+def wait_for_activity(serial: str, activity_part: str, timeout: float = 20.0,
+                      cancelled: Optional[Callable[[], bool]] = None) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if cancelled is not None and cancelled():
+            return False
         out = shell(serial, "dumpsys activity activities", timeout=20)
         if activity_part in out:
             return True
+        if cancelled is not None and cancelled():
+            return False
         time.sleep(1.0)
     return False
 
