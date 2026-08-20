@@ -2,7 +2,7 @@
 import pytest
 
 from app.core import whatsapp_bot as wb
-from app.core.exceptions import WhatsAppError
+from app.core.exceptions import PartialSendError, WhatsAppError
 
 
 class DummyNode:
@@ -32,7 +32,7 @@ def test_send_with_image_rejects_empty_list():
         messenger.send_with_image([], "hello")
 
 
-def test_send_with_image_stops_at_failed_item(monkeypatch):
+def test_send_with_image_stops_at_failed_item_without_duplicate_retry(monkeypatch):
     messenger = wb.WhatsAppMessenger("emulator-5554")
     calls = []
 
@@ -43,9 +43,22 @@ def test_send_with_image_stops_at_failed_item(monkeypatch):
 
     monkeypatch.setattr(messenger, "_send_single_image", fake_send)
 
-    with pytest.raises(WhatsAppError, match="ảnh thứ hai lỗi"):
+    with pytest.raises(PartialSendError, match=r"Đã gửi 1/3 ảnh.*ảnh thứ hai lỗi"):
         messenger.send_with_image(["a.jpg", "b.jpg", "c.jpg"], "hello")
     assert calls == [0, 1]
+
+
+def test_first_image_failure_remains_retryable(monkeypatch):
+    messenger = wb.WhatsAppMessenger("emulator-5554")
+
+    def fail_first(path, message, *, index):
+        raise WhatsAppError("ảnh đầu lỗi")
+
+    monkeypatch.setattr(messenger, "_send_single_image", fail_first)
+
+    with pytest.raises(WhatsAppError, match="ảnh đầu lỗi") as exc_info:
+        messenger.send_with_image(["a.jpg", "b.jpg"], "hello")
+    assert not isinstance(exc_info.value, PartialSendError)
 
 
 def test_push_image_uses_checked_push_touch_and_scan(monkeypatch):
