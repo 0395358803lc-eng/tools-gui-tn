@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy rotation="0">
+  <node index="0" text="" resource-id=""
+        class="android.widget.EditText" package="com.android.contacts"
+        content-desc="" hint="Phone" clickable="true" enabled="true"
+        bounds="[100,600][1000,760]" />
+  <node index="1" text="SAVE" resource-id="com.whatsapp:id/keyboard_aware_save_button"
+        class="android.widget.Button" package="com.android.contacts"
+        content-desc="" clickable="true" enabled="true"
+        bounds="[800,80][1060,200]" />
+</hierarchy>
