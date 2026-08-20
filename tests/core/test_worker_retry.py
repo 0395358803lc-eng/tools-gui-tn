@@ -15,6 +15,7 @@ def _prepare_worker(monkeypatch):
     monkeypatch.setattr(wk.avd_manager.manager, "is_running_headless", lambda name: True)
     monkeypatch.setattr(wk, "validate_broadcast_inputs", lambda *args, **kwargs: PreflightResult())
     monkeypatch.setattr(wk, "run_device_preflight", lambda *args, **kwargs: PreflightResult())
+    monkeypatch.setattr(wk, "return_home_best_effort", lambda *args, **kwargs: True)
 
 
 def test_preflight_failure_prevents_bot_creation(monkeypatch):
