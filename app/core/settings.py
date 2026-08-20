@@ -1,4 +1,4 @@
-"""Lưu/nạp cấu hình JSON - tự khởi tạo mặc định, khôi phục cấu hình riêng từng thiết bị."""
+"""Lưu/nạp cấu hình JSON - khởi tạo tường minh tại application startup."""
 import json
 import sys
 from pathlib import Path
@@ -50,10 +50,11 @@ def _defaults() -> dict:
 
 
 def ensure_config() -> None:
-    """Tạo thư mục config/ và settings.json (nếu chưa có) với giá trị mặc định.
+    """Tạo thư mục config/ và settings.json nếu chưa có.
 
-    Khi chạy exe onefile: sao chép bản `default_settings.json` từ bundle sang cạnh exe
-    nếu chưa có, để thư mục config cạnh exe luôn đủ cả 2 file.
+    Khi chạy exe onefile: sao chép `default_settings.json` từ bundle sang cạnh exe
+    nếu chưa có. Hàm này phải được gọi tường minh tại application startup, không chạy
+    như side effect khi import module.
     """
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -124,10 +125,3 @@ def _merge(base: dict, override: dict) -> dict:
         else:
             merged[key] = value
     return merged
-
-
-# Khởi tạo config mặc định ngay khi import (đảm bảo config/settings.json luôn tồn tại)
-try:
-    ensure_config()
-except ConfigError:
-    pass

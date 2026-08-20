@@ -4,8 +4,10 @@ Hỗ trợ `--self-test`: kiểm tra import các module chính rồi thoát (dù
 """
 import sys
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
+from app.core import settings
+from app.core.exceptions import ConfigError
 from app.ui.main_window import MainWindow
 
 
@@ -21,8 +23,16 @@ def _self_test() -> int:
 def main() -> int:
     if "--self-test" in sys.argv:
         return _self_test()
+
     app = QApplication(sys.argv)
     app.setApplicationName("Tools Tự Động Gửi Tin Nhắn WhatsApp")
+
+    try:
+        settings.ensure_config()
+    except ConfigError as exc:
+        QMessageBox.critical(None, "Lỗi cấu hình", str(exc))
+        return 1
+
     window = MainWindow()
     window.show()
     return app.exec()
