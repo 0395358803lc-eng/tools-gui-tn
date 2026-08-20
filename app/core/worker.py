@@ -9,7 +9,7 @@ from PySide6.QtCore import QThread, Signal
 
 from . import avd_manager
 from .exceptions import ADBError, PartialSendError, WhatsAppError
-from .logging_setup import attach_qt_handler, device_logger, log_success
+from .logging_setup import attach_qt_handler, device_logger, log_success, mask_phone
 from .whatsapp_bot import WhatsAppBot
 
 
@@ -25,9 +25,9 @@ class SendConfig:
 class BroadcastWorker(QThread):
     """Worker gửi tin cho 1 thiết bị."""
 
-    log_signal = Signal(str, str)          # (message, level)
-    progress_signal = Signal(int, int, int)  # (done, total, ok)
-    finished_signal = Signal(str, bool)    # (avd_name, success_all)
+    log_signal = Signal(str, str)
+    progress_signal = Signal(int, int, int)
+    finished_signal = Signal(str, bool)
 
     def __init__(self, config: SendConfig, serial: str, retries: int = 2,
                  retry_backoff: float = 1.0, max_consecutive_failures: int = 5,
@@ -75,7 +75,8 @@ class BroadcastWorker(QThread):
                     self._logger.warning("Đã dừng theo yêu cầu.")
                     break
 
-                self._logger.info(f"[{idx}/{total}] Đang gửi tới {phone}...")
+                phone_label = mask_phone(phone)
+                self._logger.info(f"[{idx}/{total}] Đang gửi tới {phone_label}...")
                 last_err = None
                 success = False
                 t_phone = time.monotonic()
@@ -88,7 +89,7 @@ class BroadcastWorker(QThread):
                         success = True
                         elapsed = time.monotonic() - t_phone
                         log_success(self._logger,
-                                    f"[{idx}/{total}] GỬI THÀNH CÔNG tới {phone} "
+                                    f"[{idx}/{total}] GỬI THÀNH CÔNG tới {phone_label} "
                                     f"({elapsed:.1f}s).")
                         break
                     except PartialSendError as e:
@@ -107,9 +108,9 @@ class BroadcastWorker(QThread):
                             if delay > 0:
                                 self._logger.info(f"Chờ {delay:.1f}s trước lần retry tiếp theo...")
                                 self._sleep_interval(delay)
-                    except Exception as e:  # noqa: BLE001 - lỗi không lường trước, không retry
+                    except Exception as e:  # noqa: BLE001
                         last_err = e
-                        self._logger.error(f"[{idx}/{total}] LỖI tới {phone}: {e}")
+                        self._logger.error(f"[{idx}/{total}] LỖI tới {phone_label}: {e}")
                         break
 
                 if self._stop:
@@ -123,7 +124,7 @@ class BroadcastWorker(QThread):
                     consecutive_failures += 1
                     if last_err is not None:
                         self._logger.error(
-                            f"[{idx}/{total}] LỖI tới {phone}: {last_err} ({elapsed:.1f}s)")
+                            f"[{idx}/{total}] LỖI tới {phone_label}: {last_err} ({elapsed:.1f}s)")
 
                 self.progress_signal.emit(idx, total, ok)
 
