@@ -1,0 +1,13 @@
+{
+  "geometry": "AdnQywADAAAAAAGwAAAAAAAABq8AAAQOAAABsAAAAB8AAAavAAAEDgAAAAAAAAAAB4AAAAGwAAAAHwAABq8AAAQO",
+  "tab": 1,
+  "logging_level": "INFO",
+  "devices": {
+    "whatsapp_device_01": {
+      "numbers": "12052912363\n12052816386\n12052009964\n12052928256\n12053352458\n",
+      "message": "hello 12345",
+      "images": [],
+      "interval": 5
+    }
+  }
+}
