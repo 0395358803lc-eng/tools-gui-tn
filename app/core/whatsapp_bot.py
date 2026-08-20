@@ -50,18 +50,19 @@ class _Base:
         if self._is_adbkeyboard():
             self._broadcast_adbkeyboard(text)
             return
-        escaped = text.replace(" ", "%s")
-        escaped = escaped.replace("&", "\\&").replace("|", "\\|")
-        adb.input_text(self.serial, escaped)
+        adb.input_text(self.serial, text)
 
     def _is_adbkeyboard(self) -> bool:
-        out = adb.shell(self.serial, "ime list -s", timeout=10)
+        out = adb.shell_args(self.serial, ["ime", "list", "-s"], timeout=10)
         return sel.ADB_IME in out
 
     def _broadcast_adbkeyboard(self, text: str) -> None:
-        cmd = ("am broadcast -a " + sel.ADB_IME_INPUT_ACTION +
-               " --es msg '" + text.replace("'", "") + "'")
-        adb.shell(self.serial, cmd, timeout=10)
+        adb.shell_args(
+            self.serial,
+            ["am", "broadcast", "-a", sel.ADB_IME_INPUT_ACTION, "--es", "msg", text],
+            timeout=10,
+            check=True,
+        )
 
     # ------------------------------------------------------------------
     # Xử lý ANR / màn hình chưa sẵn sàng
