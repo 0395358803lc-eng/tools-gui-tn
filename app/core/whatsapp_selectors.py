@@ -33,16 +33,6 @@ TEXT_GALLERY = "Gallery"
 DESC_CAPTION = "Add a caption"
 HINT_CAPTION = "Add a caption"
 
-# Tọa độ fallback cho ô nhập phone (đã xác minh trên AVD)
-FALLBACK_PHONE_COORD = (919, 1231)
-
-
-class FallbackCoord:
-    """Node giả chỉ có center, dùng cho tọa độ fallback khi không tìm được node thật."""
-
-    def __init__(self, center: tuple[int, int]):
-        self.center = center
-
 
 def _edit_text_by_semantics(dump: UiDump, label: str) -> Optional[Node]:
     """Ưu tiên hint -> content-desc -> text trên các EditText."""
