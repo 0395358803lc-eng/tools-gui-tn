@@ -10,8 +10,9 @@ dist/
 .eggs/
 *.egg
 
-# Logs
+# Logs / generated reports
 logs/*.log
+reports/
 
 # Config (user-specific)
 config/settings.json
