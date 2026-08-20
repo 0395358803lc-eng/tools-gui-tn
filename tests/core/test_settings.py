@@ -12,6 +12,7 @@ def isolated_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "settings.json")
     monkeypatch.setattr(settings, "DEFAULT_SETTINGS_FILE", tmp_path / "default_settings.json")
+    monkeypatch.setattr(settings, "LEGACY_SETTINGS_FILE", tmp_path / "legacy-missing.json")
     settings.ensure_config()
     return tmp_path
 
@@ -74,9 +75,74 @@ def test_ensure_config_uses_builtin_defaults_when_default_file_missing(tmp_path,
     monkeypatch.setattr(settings, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "settings.json")
     monkeypatch.setattr(settings, "DEFAULT_SETTINGS_FILE", tmp_path / "missing-default.json")
+    monkeypatch.setattr(settings, "LEGACY_SETTINGS_FILE", tmp_path / "missing-legacy.json")
     monkeypatch.setattr(settings, "_bundle_config", lambda name: None)
+    monkeypatch.setattr(settings, "_installed_config", lambda name: tmp_path / "missing-installed.json")
 
     settings.ensure_config()
     saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
+    assert saved["tab"] == 0
+    assert saved["devices"] == {}
+
+
+def test_ensure_config_migrates_valid_legacy_settings(tmp_path, monkeypatch):
+    runtime = tmp_path / "runtime"
+    legacy = tmp_path / "legacy" / "settings.json"
+    legacy.parent.mkdir()
+    legacy.write_text(
+        json.dumps({"tab": 2, "logging_level": "DEBUG", "devices": {"avd_1": {"interval": 9}}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(settings, "CONFIG_DIR", runtime)
+    monkeypatch.setattr(settings, "SETTINGS_FILE", runtime / "settings.json")
+    monkeypatch.setattr(settings, "DEFAULT_SETTINGS_FILE", runtime / "default_settings.json")
+    monkeypatch.setattr(settings, "LEGACY_SETTINGS_FILE", legacy)
+    monkeypatch.setattr(settings, "_bundle_config", lambda name: None)
+    monkeypatch.setattr(settings, "_installed_config", lambda name: tmp_path / "missing-default.json")
+
+    settings.ensure_config()
+
+    migrated = json.loads((runtime / "settings.json").read_text(encoding="utf-8"))
+    assert migrated["tab"] == 2
+    assert migrated["devices"]["avd_1"]["interval"] == 9
+    assert legacy.exists()
+
+
+def test_existing_runtime_settings_are_not_overwritten_by_legacy(tmp_path, monkeypatch):
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    current = runtime / "settings.json"
+    current.write_text(json.dumps({"tab": 1}), encoding="utf-8")
+    legacy = tmp_path / "legacy.json"
+    legacy.write_text(json.dumps({"tab": 99}), encoding="utf-8")
+
+    monkeypatch.setattr(settings, "CONFIG_DIR", runtime)
+    monkeypatch.setattr(settings, "SETTINGS_FILE", current)
+    monkeypatch.setattr(settings, "DEFAULT_SETTINGS_FILE", runtime / "default_settings.json")
+    monkeypatch.setattr(settings, "LEGACY_SETTINGS_FILE", legacy)
+    monkeypatch.setattr(settings, "_bundle_config", lambda name: None)
+    monkeypatch.setattr(settings, "_installed_config", lambda name: tmp_path / "missing-default.json")
+
+    settings.ensure_config()
+
+    assert json.loads(current.read_text(encoding="utf-8"))["tab"] == 1
+
+
+def test_invalid_legacy_settings_fall_back_to_defaults(tmp_path, monkeypatch):
+    runtime = tmp_path / "runtime"
+    legacy = tmp_path / "legacy.json"
+    legacy.write_text("{invalid", encoding="utf-8")
+
+    monkeypatch.setattr(settings, "CONFIG_DIR", runtime)
+    monkeypatch.setattr(settings, "SETTINGS_FILE", runtime / "settings.json")
+    monkeypatch.setattr(settings, "DEFAULT_SETTINGS_FILE", runtime / "default_settings.json")
+    monkeypatch.setattr(settings, "LEGACY_SETTINGS_FILE", legacy)
+    monkeypatch.setattr(settings, "_bundle_config", lambda name: None)
+    monkeypatch.setattr(settings, "_installed_config", lambda name: tmp_path / "missing-default.json")
+
+    settings.ensure_config()
+
+    saved = json.loads((runtime / "settings.json").read_text(encoding="utf-8"))
     assert saved["tab"] == 0
     assert saved["devices"] == {}
