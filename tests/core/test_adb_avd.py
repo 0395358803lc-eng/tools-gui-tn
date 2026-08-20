@@ -107,6 +107,29 @@ def test_devices_parsing(monkeypatch):
     assert adb.devices() == ["emulator-5554"]
 
 
+def test_wait_for_activity_honors_cancel_before_shell(monkeypatch):
+    calls = []
+    monkeypatch.setattr(adb, "shell", lambda *args, **kwargs: calls.append(args) or "")
+
+    assert adb.wait_for_activity(
+        "emulator-5554", "com.whatsapp/", cancelled=lambda: True) is False
+    assert calls == []
+
+
+def test_wait_for_activity_honors_cancel_after_poll(monkeypatch):
+    calls = []
+    cancel_checks = iter([False, True])
+    monkeypatch.setattr(adb, "shell", lambda *args, **kwargs: calls.append(args) or "")
+    monkeypatch.setattr(adb.time, "sleep", lambda seconds: pytest.fail("should not sleep after cancel"))
+
+    assert adb.wait_for_activity(
+        "emulator-5554",
+        "com.whatsapp/",
+        cancelled=lambda: next(cancel_checks),
+    ) is False
+    assert len(calls) == 1
+
+
 def test_avd_fill_info(tmp_path):
     from app.core import avd_manager as am
 
