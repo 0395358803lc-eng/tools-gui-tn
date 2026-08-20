@@ -26,9 +26,16 @@ _RECIPIENT_COLUMNS = [
 
 
 def _safe_cell(value):
-    """Neutralize chuỗi có thể bị Excel hiểu thành formula."""
-    if isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
-        return "'" + value
+    """Neutralize chuỗi có thể bị Excel/CSV viewer hiểu thành formula.
+
+    Kiểm tra sau khi bỏ whitespace/control phổ biến ở đầu vì payload kiểu
+    ``\t=SUM(...)`` hoặc ``  @cmd`` vẫn có thể bị spreadsheet xử lý đặc biệt.
+    Apostrophe luôn được chèn ở ký tự đầu tiên của cell, giữ nguyên nội dung gốc.
+    """
+    if isinstance(value, str):
+        probe = value.lstrip(" \t\r\n")
+        if probe.startswith(_FORMULA_PREFIXES):
+            return "'" + value
     return value
 
 
