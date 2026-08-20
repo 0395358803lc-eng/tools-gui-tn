@@ -15,7 +15,7 @@ from . import uiautomator as ui
 from . import whatsapp_selectors as sel
 from .data_manager import normalize_phone
 from .exceptions import ADBError, PartialSendError, WhatsAppError
-from .logging_setup import log_success
+from .logging_setup import log_success, mask_phone
 
 ANR_PATTERN = "isn.t responding"
 
@@ -177,9 +177,10 @@ class WhatsAppContactManager(_Base):
     def create_contact(self, phone: str) -> None:
         self._ensure_not_cancelled()
         phone_digits = normalize_phone(phone)
+        phone_label = mask_phone(phone_digits)
         dump = ui.ui_dump(self.serial, cancelled=self._cancelled)
         if dump and any(sel.matches_phone(n.text, phone_digits) for n in dump.nodes):
-            self._ok(f"Số {phone_digits} đã có trong danh bạ, bỏ qua tạo mới.")
+            self._ok(f"Số {phone_label} đã có trong danh bạ, bỏ qua tạo mới.")
             return
 
         new_contact = dump.find(text=sel.TEXT_NEW_CONTACT) if dump else None
@@ -227,12 +228,13 @@ class WhatsAppContactManager(_Base):
             self._ensure_not_cancelled()
             raise WhatsAppError("Lưu danh bạ xong nhưng không quay lại được màn chọn liên hệ")
         time.sleep(1)
-        self._ok(f"Đã lưu danh bạ {phone_digits}.")
+        self._ok(f"Đã lưu danh bạ {phone_label}.")
 
     def open_chat(self, phone: str) -> None:
         self._ensure_not_cancelled()
         phone_digits = normalize_phone(phone)
-        self._info(f"Mở cuộc trò chuyện với {phone_digits}...")
+        phone_label = mask_phone(phone_digits)
+        self._info(f"Mở cuộc trò chuyện với {phone_label}...")
         self._ensure_screen_ready()
 
         row = None
@@ -248,7 +250,7 @@ class WhatsAppContactManager(_Base):
             time.sleep(0.5)
         if row is None:
             self._ensure_not_cancelled()
-            raise WhatsAppError(f"Không tìm thấy liên hệ {phone_digits} trong danh bạ")
+            raise WhatsAppError(f"Không tìm thấy liên hệ {phone_label} trong danh bạ")
         adb.tap(self.serial, *row.center)
         found = adb.wait_for_activity(
             self.serial,
