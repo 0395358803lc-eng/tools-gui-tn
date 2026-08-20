@@ -44,6 +44,12 @@ def test_broadcast_report_summary_counts():
     assert report.cancelled_count == 0
 
 
+def test_safe_cell_neutralizes_formula_after_leading_whitespace():
+    assert exporter._safe_cell("\t=SUM(1,1)") == "'\t=SUM(1,1)"
+    assert exporter._safe_cell("  @cmd") == "'  @cmd"
+    assert exporter._safe_cell(" normal text") == " normal text"
+
+
 def test_export_csv_writes_recipient_rows_and_neutralizes_formula(tmp_path):
     report = sample_report()
     target = exporter.export_csv(report, tmp_path / "report.csv")
