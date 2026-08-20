@@ -25,10 +25,14 @@ def mask_phone(value: str, prefix: int = 3, suffix: int = 2) -> str:
     text = str(value or "")
     if not text:
         return ""
-    visible = max(0, prefix) + max(0, suffix)
+    prefix = max(0, int(prefix))
+    suffix = max(0, int(suffix))
+    visible = prefix + suffix
     if len(text) <= visible:
         return "*" * len(text)
-    return text[:max(0, prefix)] + "*" * (len(text) - visible) + text[-max(0, suffix):]
+    head = text[:prefix] if prefix else ""
+    tail = text[-suffix:] if suffix else ""
+    return head + "*" * (len(text) - visible) + tail
 
 
 class QtLogHandler(logging.Handler):
